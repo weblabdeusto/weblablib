@@ -6,7 +6,7 @@ app = Flask(__name__)
 
 # TODO: Change these settings
 app.config['SECRET_KEY'] = 'something random'
-app.config['WEBLAB_USERNAME'] = 'admin'
+app.config['WEBLAB_USERNAME'] = 'weblabdeusto'
 app.config['WEBLAB_PASSWORD'] = 'password'
 app.config['WEBLAB_SESSION_ID_NAME'] = 'lab_session_id'
 app.config['SESSION_COOKIE_NAME'] = 'advanced_lab'
@@ -17,7 +17,7 @@ app.config['SESSION_COOKIE_PATH'] = '/lab'
 # app.config['WEBLAB_TIMEOUT'] = 15 # in seconds, default value
 # app.config['WEBLAB_SCHEME'] = 'https'
 
-weblab = WebLab(app, url='/foo', public_url='/lab/public')
+weblab = WebLab(app, base_url='/foo', callback_url='/lab/public')
 toolbar = DebugToolbarExtension(app)
 
 @weblab.initial_url
