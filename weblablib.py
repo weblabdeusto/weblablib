@@ -120,8 +120,8 @@ class WebLab(object):
         self._redirection_on_forbiden = None
         self._template_on_forbiden = None
 
-        self._on_start = lambda *args, **kwargs: None
-        self._on_dispose = lambda *args, **kwargs: None
+        self._on_start = None
+        self._on_dispose = None
 
         self._initialized = False
 
@@ -555,13 +555,15 @@ def _start_session():
     if scheme:
         kwargs['_scheme'] = scheme
 
-    user = _get_user_from_redis(session_id)
-    try:
-        data = _current_weblab()._on_start(client_initial_data, server_initial_data, user)
-    except:
-        traceback.print_exc()
-    else:
-        _current_redis().hset('weblab:active:{}'.format(session_id), 'data', json.dumps(data))
+    weblab = _current_weblab()
+    if weblab._on_start:
+        user = _get_user_from_redis(session_id)
+        try:
+            data = weblab._on_start(client_initial_data, server_initial_data, user)
+        except:
+            traceback.print_exc()
+        else:
+            _current_redis().hset('weblab:active:{}'.format(session_id), 'data', json.dumps(data))
 
     link = url_for('callback_url', session_id=session_id, _external = True, **kwargs)
     return jsonify(url=link, session_id=session_id)
@@ -619,11 +621,14 @@ def _dispose_experiment(session_id):
         redis_client = _current_redis()
         back = redis_client.hget("weblab:active:{}".format(session_id), "back")
         if back is not None:
-            user = _get_user_from_redis(session_id)
-            try:
-                _current_weblab()._on_dispose(user)
-            except:
-                traceback.print_exc()
+            weblab = _current_weblab()
+            if weblab._on_dispose:
+                user = _get_user_from_redis(session_id)
+                try:
+                    _current_weblab()._on_dispose(user)
+                except:
+                    traceback.print_exc()
+
             pipeline = redis_client.pipeline()
             pipeline.delete("weblab:active:{}".format(session_id))
             pipeline.hset("weblab:inactive:{}".format(session_id), "back", back)
