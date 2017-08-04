@@ -9,12 +9,75 @@ import datetime
 import traceback
 from functools import wraps
 from collections import namedtuple
-from flask import Blueprint, jsonify, request, current_app, Response, redirect, url_for, g, session, after_this_request
+from flask import Blueprint, jsonify, request, current_app, Response, redirect, url_for, g, session, after_this_request, redirect
 
 # 
 # TODO: logout
 # TODO: make sure the user is out
 # 
+class ConfigurationKeys(object):
+
+    # # # # # # # # # #
+    #                 #
+    #  Mandatory keys #
+    #                 #
+    # # # # # # # # # #
+
+    # 
+    # WebLab-Deusto needs to be authenticated in this system.
+    # So we need a pair of credentials representing the system, 
+    # not the particular user coming. This is what you configured
+    # in WebLab-Deusto when you add the laboratory.
+    # 
+    WEBLAB_USERNAME = 'WEBLAB_USERNAME'
+    WEBLAB_PASSWORD = 'WEBLAB_PASSWORD'
+
+    # # # # # # # # # # 
+    #                 #
+    #  Optional keys  #
+    #                 #
+    # # # # # # # # # #
+    
+    # the base URL is what you want to put before the /weblab/ URLs,
+    # e.g., if you want to put it in /private/weblab/ you can do that
+    # (after all, even at web server level you can configure that 
+    # the weblab URLs are only available to WebLab-Deusto)
+    WEBLAB_BASE_URL = 'WEBLAB_BASE_URL'
+
+    # the callback URL must be a public URL where users will be 
+    # forwarded to. For example "/lab/callback"
+    WEBLAB_CALLBACK_URL = 'WEBLAB_CALLBACK_URL'
+
+    # This is the key used in the Flask session object.
+    WEBLAB_SESSION_ID_NAME = 'WEBLAB_SESSION_ID_NAME'
+
+    # Redis URL for storing information
+    WEBLAB_REDIS_URL = 'WEBLAB_REDIS_URL'
+
+    # Number of seconds. If the user does not poll in that time, we consider
+    # that he will be kicked out. Defaults to 15 seconds.
+    WEBLAB_TIMEOUT = 'WEBLAB_TIMEOUT'
+
+    # Automatically poll in every method. By default it's true. So any call 
+    # made to any web method will automatically poll.
+    WEBLAB_AUTOPOLL = 'WEBLAB_AUTOPOLL'
+
+    # If a user doesn't have a session, you can forward him to WebLab-Deusto.
+    # put the link to the WebLab-Deusto there
+    WEBLAB_UNAUTHORIZED_LINK = 'WEBLAB_UNAUTHORIZED_LINK'
+
+    # If a user doesn't have a session and you don't configure WEBLAB_UNAUTHORIZED_LINK
+    # then you can put 'unauthorized.html' here, and place a 'unauthorized.html' file
+    # in a 'templates' directory (see Flask documentation for details)
+    WEBLAB_UNAUTHORIZED_TEMPLATE = 'WEBLAB_UNAUTHORIZED_TEMPLATE'
+
+    # Force 'http' or 'https'
+    WEBLAB_SCHEME = 'WEBLAB_SCHEME'
+
+    # Once a user is moved to inactive, the session has to expire at some point.
+    # Establish in seconds in how long (defaults to 3600, which is one hour)
+    WEBLAB_PAST_USERS_TIMEOUT = 'WEBLAB_PAST_USERS_TIMEOUT'
+
 
 
 #############################################################
@@ -54,6 +117,9 @@ class WebLab(object):
         self.timeout = 15 # Will be overrided by the init_app method
         self._initial_url = None
         self._session_id_name = 'weblab_session_id' # overrided by WEBLAB_SESSION_ID_NAME
+        self._redirection_on_forbiden = None
+        self._template_on_forbiden = None
+
         self._on_start = lambda *args, **kwargs: None
         self._on_dispose = lambda *args, **kwargs: None
 
@@ -82,21 +148,23 @@ class WebLab(object):
         # 
         # Initialize Redis Manager
         # 
-        redis_url = self._app.config.get('WEBLAB_REDIS_URL', 'redis://localhost:6379/0')
+        redis_url = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_URL, 'redis://localhost:6379/0')
         self._redis_manager = _RedisManager(redis_url)
         
         # 
         # Initialize session settings
         # 
-        self._session_id_name = self._app.config.get('WEBLAB_SESSION_ID_NAME', 'weblab_session_id')
-        self.timeout = self._app.config.get('WEBLAB_TIMEOUT', 15) # TODO: Not used yet
-        autopoll = self._app.config.get('WEBLAB_AUTOPOLL', True) 
+        self._session_id_name = self._app.config.get(ConfigurationKeys.WEBLAB_SESSION_ID_NAME, 'weblab_session_id')
+        self.timeout = self._app.config.get(ConfigurationKeys.WEBLAB_TIMEOUT, 15) # TODO: Not used yet
+        autopoll = self._app.config.get(ConfigurationKeys.WEBLAB_AUTOPOLL, True)
+        self._redirection_on_forbiden = self._app.config.get(ConfigurationKeys.WEBLAB_UNAUTHORIZED_LINK)
+        self._template_on_forbiden = self._app.config.get(ConfigurationKeys.WEBLAB_UNAUTHORIZED_TEMPLATE)
     
         # 
         # Initialize and register the "weblab" blueprint
         # 
         if not self._base_url:
-            self._base_url = self._app.config.get('WEBLAB_BASE_URL')
+            self._base_url = self._app.config.get(ConfigurationKeys.WEBLAB_BASE_URL)
 
         if self._base_url:
             url = '{}/weblab'.format(self._base_url)
@@ -111,7 +179,7 @@ class WebLab(object):
         # Add a callback URL
         # 
         if not self._callback_url:
-            self._callback_url = self._app.config.get('WEBLAB_CALLBACK_URL')
+            self._callback_url = self._app.config.get(ConfigurationKeys.WEBLAB_CALLBACK_URL)
 
         if not self._callback_url:
             raise ValueError("Invalid callback URL. Either provide it in the constructor or in the WEBLAB_CALLBACK_URL configuration")
@@ -124,11 +192,11 @@ class WebLab(object):
                 print("ERROR: You MUST use @weblab.initial_url to point where the WebLab users should be redirected to.", file=sys.stderr)
                 return "ERROR: laboratory not properly configured, didn't call @weblab.initial_url", 500
             
-            # 
-            # TODO: check if the user exists before storing the session_id in the session object
-            # 
-            session[self._session_id_name] = session_id
-            return redirect(self._initial_url())
+            if self._redis_manager.session_exists(session_id):
+                session[self._session_id_name] = session_id
+                return redirect(self._initial_url())
+
+            return self._forbidden_handler()
 
         # 
         # Add autopoll
@@ -162,30 +230,56 @@ class WebLab(object):
         self._initialized = True
 
     def _session_id(self):
-        """Return the session identifier from the Flask session object"""
+        """
+        Return the session identifier from the Flask session object
+        """
         return session.get(self._session_id_name)
 
     def _forbidden_handler(self):
-        # 
-        # TODO: 
-        # let administrators to:
-        # 1. put a custom template
-        # 2. redirect to a default link (e.g., a particular WebLab-Deusto)
-        # 
+        if self._redirection_on_forbiden:
+            return redirect(self._redirection_on_forbiden)
+
+        if self._template_on_forbiden:
+            return render_template(self._template_on_forbiden)
+
         return "Access forbidden", 403
     
     def initial_url(self, func):
-        """This must be called. It's a decorator for establishing where the user should be redirected (the lab itself).
+        """
+        This must be called. It's a decorator for establishing where the user should be redirected (the lab itself).
 
-        Typically, this is just the url_for('index') or so in the website."""
+        Typically, this is just the url_for('index') or so in the website.
+        """
+        if self._initial_url is not None:
+            raise ValueError("initial_url has already been defined")
+
         self._initial_url = func
         return func
 
     def on_start(self, func):
+        """
+        Register a method for being called when a new user comes. The format is:
+        
+        def start(client_data, server_data, user):
+            return data # simple data, e.g., None, a dict, a list... that will be available as current_user().data
+
+        """
+        if self._on_start is not None:
+            raise ValueError("on_start has already been defined")
+
         self._on_start = func
         return func
 
     def on_dispose(self, func):
+        """
+        Register a method for being called when a new user comes.
+
+        def stop(user):
+            pass
+        """
+        if self._on_dispose is not None:
+            raise ValueError("on_dispose has already been defined")
+
         self._on_dispose = func
         return func
 
@@ -388,8 +482,8 @@ def _require_http_credentials():
     else:
         provided_username = provided_password = None
 
-    expected_username = current_app.config['WEBLAB_USERNAME']
-    expected_password = current_app.config['WEBLAB_PASSWORD']
+    expected_username = current_app.config[ConfigurationKeys.WEBLAB_USERNAME]
+    expected_password = current_app.config[ConfigurationKeys.WEBLAB_PASSWORD]
     if provided_username != expected_username or provided_password != expected_password:
         if request.url.endswith('/test'):
             error_message = "Invalid credentials: no username provided"
@@ -457,7 +551,7 @@ def _start_session():
     pipeline.execute()
 
     kwargs = {}
-    scheme = current_app.config.get('WEBLAB_SCHEME')
+    scheme = current_app.config.get(ConfigurationKeys.WEBLAB_SCHEME)
     if scheme:
         kwargs['_scheme'] = scheme
 
@@ -535,7 +629,7 @@ def _dispose_experiment(session_id):
             pipeline.hset("weblab:inactive:{}".format(session_id), "back", back)
             # During half an hour after being created, the user is redirected to
             # the original URL. After that, every record of the user has been deleted
-            pipeline.expire("weblab:inactive:{}".format(session_id), current_app.config.get('WEBLAB_PAST_USERS_TIMEOUT', 3600))
+            pipeline.expire("weblab:inactive:{}".format(session_id), current_app.config.get(ConfigurationKeys.WEBLAB_PAST_USERS_TIMEOUT, 3600))
             pipeline.execute()
             return jsonify(message="Deleted")
         return jsonify(message="Not found")
@@ -578,7 +672,7 @@ class _RedisManager(object):
             return 0
 
         return left
-
+    
     def get_user(self, session_id, retrieve_past = False):
         pipeline = self.client.pipeline()
         key = 'weblab:active:{}'.format(session_id)
@@ -591,6 +685,9 @@ class _RedisManager(object):
 
         if retrieve_past:
             return self.get_past_user(session_id)
+
+    def session_exists(self, session_id, retrieve_past = True):
+        return self.get_user(session_id, retrieve_past = retrieve_past) is not None
 
     def get_past_user(self, session_id):
         pipeline = self.client.pipeline()
