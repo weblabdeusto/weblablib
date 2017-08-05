@@ -14,6 +14,7 @@ from flask import Blueprint, jsonify, request, current_app, Response, redirect, 
 # 
 # TODO: make sure the user is out
 # TODO: migrate all redis code (from the blueprint) to the RedisManager
+# TODO: make sure dates in redis are converted to float, etc.
 # 
 class ConfigurationKeys(object):
 
@@ -313,6 +314,9 @@ class User(namedtuple("User", ["back", "last_poll", "max_date", "username", "use
     def time_left(self):
         return float(self.max_date) - float(_current_timestamp())
 
+    def to_past_user(self):
+        return PastUser(back=self.back, max_date=self.max_date, username=self.username, username_unique=self.username_unique, data=self.data)
+
     active = True # Is the user an active user or a PastUser?
 
 class PastUser(namedtuple("PastUser", ["back", "max_date", "username", "username_unique", "data"])):
@@ -547,18 +551,15 @@ def _start_session():
 
     # Prepare adding this to redis
     max_date_int = _to_timestamp(max_date)
-    last_poll_int = _current_timestamp()
     
-    pipeline = _current_redis().pipeline()
-    pipeline.hset('weblab:active:{}'.format(session_id), 'max_date', max_date_int)
-    pipeline.hset('weblab:active:{}'.format(session_id), 'last_poll', last_poll_int)
-    pipeline.hset('weblab:active:{}'.format(session_id), 'username', server_initial_data['request.username'])
-    pipeline.hset('weblab:active:{}'.format(session_id), 'username-unique', server_initial_data['request.username.unique'])
-    pipeline.hset('weblab:active:{}'.format(session_id), 'data', 'null')
-    pipeline.hset('weblab:active:{}'.format(session_id), 'back', request_data['back'])
-    pipeline.hset('weblab:active:{}'.format(session_id), 'exited', 'false')
-    pipeline.expire('weblab:active:{}'.format(session_id), 30 + int(float(server_initial_data['priority.queue.slot.length'])))
-    pipeline.execute()
+    user = User(back=request_data['back'], last_poll=_current_timestamp(), max_date = _to_timestamp(max_date), 
+                username=server_initial_data['request.username'], username_unique = server_initial_data['request.username.unique'],
+                exited = False, data = None)
+
+    redis_manager = _current_redis()
+
+    redis_manager.add_user(session_id, user, expiration = 30 + int(float(server_initial_data['priority.queue.slot.length'])))
+                
 
     kwargs = {}
     scheme = current_app.config.get(ConfigurationKeys.WEBLAB_SCHEME)
@@ -567,13 +568,12 @@ def _start_session():
 
     weblab = _current_weblab()
     if weblab._on_start:
-        user = _get_user_from_redis(session_id)
         try:
             data = weblab._on_start(client_initial_data, server_initial_data, user)
         except:
             traceback.print_exc()
         else:
-            _current_redis().hset('weblab:active:{}'.format(session_id), 'data', json.dumps(data))
+            redis_manager.update_data(session_id, data)
 
     link = url_for('callback_url', session_id=session_id, _external = True, **kwargs)
     return jsonify(url=link, session_id=session_id)
@@ -586,37 +586,25 @@ def _status(session_id):
     This method provides the current status of a particular 
     user.
     """
-    last_poll = _current_redis().hget("weblab:active:{}".format(session_id), "last_poll")
-    max_date = _current_redis().hget("weblab:active:{}".format(session_id), "max_date")
-    username = _current_redis().hget("weblab:active:{}".format(session_id), "username")
-    exited = _current_redis().hget("weblab:active:{}".format(session_id), "exited")
-    
-    if exited == 'true':
+
+    # TODO: let the admin say that the time is forever
+
+    redis_manager = _current_redis()
+    user = redis_manager.get_user(session_id, retrieve_past = False)
+    if user is None:
         return jsonify(should_finish= -1)
 
-    if last_poll is not None:
-        current_time = float(_current_timestamp())
-        difference = current_time - float(last_poll)
-        print("Did not poll in", difference, "seconds")
-        if difference >= 15:
-            return jsonify(should_finish=-1)
+    if user.exited:
+        return jsonify(should_finish= -1)
 
-        print("User %s still has %s seconds" % (username, (float(max_date) - current_time)))
+    if user.time_without_polling() >= 15: # TODO: use timeout
+        return jsonify(should_finish=-1)
 
-        if float(max_date) <= current_time:
-            print("Time expired")
-            return jsonify(should_finish=-1)
+    if user.time_left() <= 0:
+        return jsonify(should_finish=-1)
 
-        return jsonify(should_finish=5)
-
-    print("User not found")
-    # 
-    # If the user is considered expired here, we can return -1 instead of 10. 
-    # The WebLab-Deusto scheduler will mark it as finished and will reassign
-    # other user.
-    # 
-    return jsonify(should_finish=-1)
-
+    current_app.logger.debug("User {} still has {} seconds".format(user.username, user.time_left()))
+    return jsonify(should_finish=5)
 
 
 @_weblab_blueprint.route('/sessions/<session_id>', methods=['POST'])
@@ -627,28 +615,31 @@ def _dispose_experiment(session_id):
     is over.
     """
     request_data = request.get_json(force=True)
-    if 'action' in request_data and request_data['action'] == 'delete':
-        redis_client = _current_redis()
-        back = redis_client.hget("weblab:active:{}".format(session_id), "back")
-        if back is not None:
-            weblab = _current_weblab()
-            if weblab._on_dispose:
-                user = _get_user_from_redis(session_id)
-                try:
-                    _current_weblab()._on_dispose(user)
-                except:
-                    traceback.print_exc()
+    if 'action' not in request_data: 
+        return jsonify(message="Unknown op")
+    
+    if request_data['action'] != 'delete':
+        return jsonify(message="Unknown op")
 
-            pipeline = redis_client.pipeline()
-            pipeline.delete("weblab:active:{}".format(session_id))
-            pipeline.hset("weblab:inactive:{}".format(session_id), "back", back)
-            # During half an hour after being created, the user is redirected to
-            # the original URL. After that, every record of the user has been deleted
-            pipeline.expire("weblab:inactive:{}".format(session_id), current_app.config.get(ConfigurationKeys.WEBLAB_PAST_USERS_TIMEOUT, 3600))
-            pipeline.execute()
-            return jsonify(message="Deleted")
+    redis_manager = _current_redis()
+    user = redis_manager.get_user(session_id, retrieve_past=False)
+    if user is None:
         return jsonify(message="Not found")
-    return jsonify(message="Unknown op")
+        
+    weblab = _current_weblab()
+    if weblab._on_dispose:
+        try:
+            _current_weblab()._on_dispose(user)
+        except:
+            traceback.print_exc()
+    
+    # TODO: make this earlier: never call on_dispose twice
+    past_user = user.to_past_user()
+    redis_manager.delete_user(session_id, past_user)
+
+    return jsonify(message="Deleted")
+
+
 
 ######################################################################################
 # 
@@ -657,8 +648,75 @@ def _dispose_experiment(session_id):
 
 
 class _RedisManager(object):
+
     def __init__(self, redis_url):
         self.client = redis.StrictRedis.from_url(redis_url)
+
+    def add_user(self, session_id, user, expiration):
+        key = 'weblab:active:{}'.format(session_id)
+
+        pipeline = self.client.pipeline()
+        pipeline.hset(key, 'max_date', user.max_date)
+        pipeline.hset(key, 'last_poll', user.last_poll)
+        pipeline.hset(key, 'username', user.username)
+        pipeline.hset(key, 'username-unique', user.username_unique)
+        pipeline.hset(key, 'data', json.dumps(user.data))
+        pipeline.hset(key, 'back', user.back)
+        pipeline.hset(key, 'exited', json.dumps(user.exited))
+        pipeline.expire(key, expiration)
+        pipeline.execute()
+
+    def update_data(self, session_id, data):
+        key = 'weblab:active:{}'.format(session_id)
+
+        pipeline = self.client.pipeline()
+        pipeline.hget(key, 'max_date')
+        pipeline.hset(key, 'data', json.dumps(data))
+        max_date, _ = pipeline.execute()
+
+        if max_date is None: # Object had been removed
+            self.client.delete(key)
+
+    def get_user(self, session_id, retrieve_past = False):
+        pipeline = self.client.pipeline()
+        key = 'weblab:active:{}'.format(session_id)
+        for name in 'back', 'last_poll', 'max_date', 'username', 'username-unique', 'data', 'exited':
+            pipeline.hget(key, name)
+        back, last_poll, max_date, username, username_unique, data, exited = pipeline.execute()
+
+        if max_date is not None:
+            return User(back=back, last_poll=last_poll, max_date=max_date, username=username, username_unique=username_unique, data=json.loads(data), exited=json.loads(exited))
+
+        if retrieve_past:
+            return self.get_past_user(session_id)
+
+    def get_past_user(self, session_id):
+        pipeline = self.client.pipeline()
+        key = 'weblab:inactive:{}'.format(session_id)
+        for name in 'back', 'max_date', 'username', 'username-unique', 'data':
+            pipeline.hget(key, name)
+
+        back, max_date, username, username_unique, data = pipeline.execute()
+
+        if max_date is not None:
+            return PastUser(back=back, max_date=max_date, username=username, username_unique=username_unique, data=json.loads(data))
+
+    def delete_user(self, session_id, past_user):
+        pipeline = self.client.pipeline()
+        pipeline.delete("weblab:active:{}".format(session_id))
+        
+        key = 'weblab:inactive:{}'.format(session_id)
+
+        pipeline.hset(key, "back", past_user.back)
+        pipeline.hset(key, "max_date", past_user.max_date)
+        pipeline.hset(key, "username", past_user.username)
+        pipeline.hset(key, "username-unique", past_user.username_unique)
+        pipeline.hset(key, "data", json.dumps(past_user.data))
+
+        # During half an hour after being created, the user is redirected to
+        # the original URL. After that, every record of the user has been deleted
+        pipeline.expire("weblab:inactive:{}".format(session_id), current_app.config.get(ConfigurationKeys.WEBLAB_PAST_USERS_TIMEOUT, 3600))
+        pipeline.execute()
 
     def force_exit(self, session_id):
         """
@@ -688,32 +746,8 @@ class _RedisManager(object):
 
         return left
     
-    def get_user(self, session_id, retrieve_past = False):
-        pipeline = self.client.pipeline()
-        key = 'weblab:active:{}'.format(session_id)
-        for name in 'back', 'last_poll', 'max_date', 'username', 'username-unique', 'data', 'exited':
-            pipeline.hget(key, name)
-        back, last_poll, max_date, username, username_unique, data, exited = pipeline.execute()
-
-        if max_date is not None:
-            return User(back=back, last_poll=last_poll, max_date=max_date, username=username, username_unique=username_unique, data=data, exited=exited)
-
-        if retrieve_past:
-            return self.get_past_user(session_id)
-
     def session_exists(self, session_id, retrieve_past = True):
         return self.get_user(session_id, retrieve_past = retrieve_past) is not None
-
-    def get_past_user(self, session_id):
-        pipeline = self.client.pipeline()
-        key = 'weblab:inactive:{}'.format(session_id)
-        for name in 'back', 'max_date', 'username', 'username-unique', 'data':
-            pipeline.hget(key, name)
-
-        back, max_date, username, username_unique, data = pipeline.execute()
-
-        if max_date is not None:
-            return PastUser(back=back, max_date=max_date, username=username, username_unique=username_unique, data=data)
 
     def poll(self, session_id):
         key = 'weblab:active:{}'.format(session_id)
