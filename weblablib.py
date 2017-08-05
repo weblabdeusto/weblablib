@@ -12,8 +12,8 @@ from collections import namedtuple
 from flask import Blueprint, jsonify, request, current_app, Response, redirect, url_for, g, session, after_this_request, redirect
 
 # 
-# TODO: logout
 # TODO: make sure the user is out
+# TODO: migrate all redis code (from the blueprint) to the RedisManager
 # 
 class ConfigurationKeys(object):
 
@@ -334,7 +334,9 @@ class PastUser(namedtuple("PastUser", ["back", "max_date", "username", "username
 # 
 
 def poll():
-    """Program that in the end of this call, poll will be called"""
+    """
+    Schedule that in the end of this call, it will update the value of the last time the user polled.
+    """
 
     if hasattr(g, 'poll_requested'):
         poll_requested = g.poll_requested
@@ -448,6 +450,14 @@ def requires_current(redirect_back=True):
     Otherwise, it will call the forbidden behavior.
     """
     return requires_login(redirect_back=redirect_back, requires_current=True)
+
+def logout():
+    """
+    Notify WebLab-Deusto that the user left the laboratory, so next user can enter.
+    """
+    session_id = _current_session_id()
+    if session_id:
+        _current_redis().force_exit(session_id)
 
 ##################################################################################################################
 # 
