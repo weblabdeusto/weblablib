@@ -1,3 +1,33 @@
+"""
+weblablib
+~~~~~~~~~
+
+This library is a wrapper for developing unmanaged WebLab-Deusto remote laboratories. You may find
+documentation about WebLab-Deusto at:
+
+   https://weblabdeusto.readthedocs.org/
+
+This library heavily relies on Flask, so if you are new to Flask, you might find very useful to
+learn a bit about it first:
+
+   http://flask.pocoo.org/
+
+The library is designed to forget about the integration with WebLab-Deusto and make it easy. It 
+provides:
+
+ * A WebLab object. You must initialize it with the app. It will include a set of new web methods
+   that WebLab-Deusto uses. It also allows you to define what methods should be call on the 
+   beginning and end of the user session.
+
+ * A set of methods to access information about the current information, such as ``current_user``,
+   ``past_user`` (if the user is not active anymore), ``requires_login`` (for methods which should
+   never be used by anonymous users), ``requires_current`` (for methods which should only be 
+   used by users who are supposed to be using the laboratory now), ``poll`` (to report WebLab
+   that the user is still active) or ``logout`` (to report WebLab that the user left).
+
+Please, check the examples in the examples folder in the github repo.
+"""
+
 from __future__ import unicode_literals, print_function, division
 
 import sys
@@ -16,7 +46,15 @@ import redis
 from flask import Blueprint, Response, jsonify, request, current_app, redirect, \
      url_for, g, session, after_this_request, render_template
 
+__all__ = ['WebLab', 'poll', 'current_user', 'past_user', 
+            'requires_login', 'requires_current',
+            'logout']
+
+
 class ConfigurationKeys(object):
+    """
+    ConfigurationKeys represents all the configuration keys available in weblablib. 
+    """
 
     # # # # # # # # # #
     #                 #

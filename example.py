@@ -5,12 +5,13 @@ from weblablib import WebLab, requires_login, current_user, poll
 app = Flask(__name__)
 
 # TODO: Change these settings
-app.config['SECRET_KEY'] = 'something random'
+app.config['SECRET_KEY'] = 'something random' # e.g., os.urandom(32)
+app.config['SESSION_COOKIE_NAME'] = 'advanced_lab'
+app.config['SESSION_COOKIE_PATH'] = '/lab'
+
 app.config['WEBLAB_USERNAME'] = 'weblabdeusto'
 app.config['WEBLAB_PASSWORD'] = 'password'
 app.config['WEBLAB_SESSION_ID_NAME'] = 'lab_session_id'
-app.config['SESSION_COOKIE_NAME'] = 'advanced_lab'
-app.config['SESSION_COOKIE_PATH'] = '/lab'
 
 # Other variables you might want to change
 # app.config['WEBLAB_REDIS_URL'] = 'redis://localhost:6379/0' # default value
@@ -25,13 +26,13 @@ def initial_url():
     return url_for('.lab')
 
 @weblab.on_start
-def on_start(client_data, server_data):
+def on_start(client_data, server_data, user):
     print("New user!")
     print(client_data)
     print(server_data)
 
 @weblab.on_dispose
-def on_stop():
+def on_stop(user):
     print("User expired. Here you should clean resources")
 
 @app.route('/lab/')
