@@ -3,7 +3,6 @@ from __future__ import unicode_literals, print_function, division
 import sys
 import json
 import time
-import redis
 import random
 import datetime
 import threading
@@ -11,11 +10,12 @@ import traceback
 
 from functools import wraps
 from collections import namedtuple
-from flask import Blueprint, jsonify, request, current_app, Response, redirect, url_for, g, session, after_this_request, redirect
 
-# 
-# TODO: make sure the user is out
-# 
+import redis
+
+from flask import Blueprint, Response, jsonify, request, current_app, redirect, \
+     url_for, g, session, after_this_request, render_template
+
 class ConfigurationKeys(object):
 
     # # # # # # # # # #
@@ -24,28 +24,28 @@ class ConfigurationKeys(object):
     #                 #
     # # # # # # # # # #
 
-    # 
+    #
     # WebLab-Deusto needs to be authenticated in this system.
-    # So we need a pair of credentials representing the system, 
+    # So we need a pair of credentials representing the system,
     # not the particular user coming. This is what you configured
     # in WebLab-Deusto when you add the laboratory.
-    # 
+    #
     WEBLAB_USERNAME = 'WEBLAB_USERNAME'
     WEBLAB_PASSWORD = 'WEBLAB_PASSWORD'
 
-    # # # # # # # # # # 
+    # # # # # # # # # #
     #                 #
     #  Optional keys  #
     #                 #
     # # # # # # # # # #
-    
+
     # the base URL is what you want to put before the /weblab/ URLs,
     # e.g., if you want to put it in /private/weblab/ you can do that
-    # (after all, even at web server level you can configure that 
+    # (after all, even at web server level you can configure that
     # the weblab URLs are only available to WebLab-Deusto)
     WEBLAB_BASE_URL = 'WEBLAB_BASE_URL'
 
-    # the callback URL must be a public URL where users will be 
+    # the callback URL must be a public URL where users will be
     # forwarded to. For example "/lab/callback"
     WEBLAB_CALLBACK_URL = 'WEBLAB_CALLBACK_URL'
 
@@ -60,7 +60,7 @@ class ConfigurationKeys(object):
     # to -1 to disable the timeout (and therefore polling makes no sense)
     WEBLAB_TIMEOUT = 'WEBLAB_TIMEOUT'
 
-    # Automatically poll in every method. By default it's true. So any call 
+    # Automatically poll in every method. By default it's true. So any call
     # made to any web method will automatically poll.
     WEBLAB_AUTOPOLL = 'WEBLAB_AUTOPOLL'
 
@@ -80,15 +80,15 @@ class ConfigurationKeys(object):
     # Establish in seconds in how long (defaults to 3600, which is one hour)
     WEBLAB_PAST_USERS_TIMEOUT = 'WEBLAB_PAST_USERS_TIMEOUT'
 
-    # In some rare occasions, it may happen that the dispose method is not called. 
+    # In some rare occasions, it may happen that the dispose method is not called.
     # For example, if the Experiment server suddenly has no internet for a temporary
     # error, the user will not call logout, and WebLab-Deusto may fail to communicate
-    # that the user has finished, and store that it has finished internally in 
+    # that the user has finished, and store that it has finished internally in
     # WebLab-Deusto. For some laboratories, it's important to be extra cautious and
     # make sure that someone calls the _dispose method. To do so, you may call
     # directly "flask clean_expired_users" manually (and cron it), or you may just
     # leave this option as True, which is the default behavior, and it will create
-    # a thread that will be in a loop. If you have 10 gunicorn workers, there will 
+    # a thread that will be in a loop. If you have 10 gunicorn workers, there will
     # be 10 threads, but it shouldn't be a problem since they're synchronized with
     # Redis internally.
     WEBLAB_AUTOCLEAN_THREAD = 'WEBLAB_AUTOCLEAN_THREAD'
@@ -96,28 +96,28 @@ class ConfigurationKeys(object):
 
 
 #############################################################
-# 
+#
 # WebLab-Deusto Flask extension:
-# 
-# 
-# 
+#
+#
+#
 
 class WebLab(object):
     """
     WebLab is a Flask extension that manages the settings (redis, session, etc.), and
     the registration of certain methods (e.g., on_start, etc.)
     """
-    def __init__(self, app = None, base_url = None, callback_url = None):
+    def __init__(self, app=None, base_url=None, callback_url=None):
         """
         Initializes the object. All the parameters are optional.
 
         @app: the Flask application
 
-        @base_url: the base URL to be used. By default, the WebLab URLs will be '/weblab/sessions/<something>'. 
-        If You provide base_url = '/foo', then it will be listening in '/foo/weblab/sessions/<something>'. 
-        This is the route that will be used in the Flask application (so if your application is deployed in /bar, 
+        @base_url: the base URL to be used. By default, the WebLab URLs will be '/weblab/sessions/<something>'.
+        If You provide base_url = '/foo', then it will be listening in '/foo/weblab/sessions/<something>'.
+        This is the route that will be used in the Flask application (so if your application is deployed in /bar,
         then it will be /bar/foo/weblab/sessions/<something> . This URLs do NOT need to be publicly available (they
-        can be only available to WebLab-Deusto if you want, by playing with the firewall or so). You can also configure 
+        can be only available to WebLab-Deusto if you want, by playing with the firewall or so). You can also configure
         it with WEBLAB_BASE_URL in the Flask configuration.
 
         @callback_url: a URL that WebLab will implement that must be public. For example, '/mylab/callback/', this URL
@@ -155,33 +155,33 @@ class WebLab(object):
             raise ValueError("app must be a Flask app")
 
         self._app = app
-        
-        # 
+
+        #
         # Register the extension
-        # 
+        #
         if 'weblab' in self._app.extensions:
             print("Overriding existing WebLab extension (did you create two WebLab() ?)", file=sys.stderr)
 
         self._app.extensions['weblab'] = self
 
-        # 
+        #
         # Initialize Redis Manager
-        # 
+        #
         redis_url = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_URL, 'redis://localhost:6379/0')
         self._redis_manager = _RedisManager(redis_url)
-        
-        # 
+
+        #
         # Initialize session settings
-        # 
+        #
         self._session_id_name = self._app.config.get(ConfigurationKeys.WEBLAB_SESSION_ID_NAME, 'weblab_session_id')
         self.timeout = self._app.config.get(ConfigurationKeys.WEBLAB_TIMEOUT, 15)
         autopoll = self._app.config.get(ConfigurationKeys.WEBLAB_AUTOPOLL, True)
         self._redirection_on_forbiden = self._app.config.get(ConfigurationKeys.WEBLAB_UNAUTHORIZED_LINK)
         self._template_on_forbiden = self._app.config.get(ConfigurationKeys.WEBLAB_UNAUTHORIZED_TEMPLATE)
-    
-        # 
+
+        #
         # Initialize and register the "weblab" blueprint
-        # 
+        #
         if not self._base_url:
             self._base_url = self._app.config.get(ConfigurationKeys.WEBLAB_BASE_URL)
 
@@ -194,9 +194,9 @@ class WebLab(object):
 
         self._app.register_blueprint(_weblab_blueprint, url_prefix=url)
 
-        # 
+        #
         # Add a callback URL
-        # 
+        #
         if not self._callback_url:
             self._callback_url = self._app.config.get(ConfigurationKeys.WEBLAB_CALLBACK_URL)
 
@@ -210,16 +210,16 @@ class WebLab(object):
             if self._initial_url is None:
                 print("ERROR: You MUST use @weblab.initial_url to point where the WebLab users should be redirected to.", file=sys.stderr)
                 return "ERROR: laboratory not properly configured, didn't call @weblab.initial_url", 500
-            
+
             if self._redis_manager.session_exists(session_id):
                 session[self._session_id_name] = session_id
                 return redirect(self._initial_url())
 
             return self._forbidden_handler()
 
-        # 
+        #
         # Add autopoll
-        # 
+        #
         if autopoll:
             @self._app.after_request
             def poll_after_request(response):
@@ -230,7 +230,7 @@ class WebLab(object):
                     poll_requested = g.poll_requested
                 else:
                     poll_requested = False
-                
+
                 # Don't poll twice: if requested manually there is another after_this_request
                 if not poll_requested:
                     session_id = _current_session_id()
@@ -238,14 +238,14 @@ class WebLab(object):
                         _current_redis().poll(session_id)
 
                 return response
-        
-        # 
+
+        #
         # Don't start if there are missing parameters
-        # 
+        #
         for key in 'WEBLAB_USERNAME', 'WEBLAB_PASSWORD':
             if key not in self._app.config:
                 raise ValueError("Invalid configuration. Missing {}".format(key))
-        
+
         if hasattr(app, 'cli'):
             @self._app.cli.command()
             def clean_expired_users():
@@ -271,7 +271,7 @@ class WebLab(object):
             return render_template(self._template_on_forbiden)
 
         return "Access forbidden", 403
-    
+
     def initial_url(self, func):
         """
         This must be called. It's a decorator for establishing where the user should be redirected (the lab itself).
@@ -287,7 +287,7 @@ class WebLab(object):
     def on_start(self, func):
         """
         Register a method for being called when a new user comes. The format is:
-        
+
         def start(client_data, server_data, user):
             return data # simple data, e.g., None, a dict, a list... that will be available as current_user().data
 
@@ -313,13 +313,13 @@ class WebLab(object):
 
 
 ##################################################################################################################
-# 
-# 
-# 
+#
+#
+#
 #         Public classes
-# 
-# 
-# 
+#
+#
+#
 
 class User(namedtuple("User", ["back", "last_poll", "max_date", "username", "username_unique", "exited", "data"])):
     """
@@ -365,13 +365,13 @@ class PastUser(namedtuple("PastUser", ["back", "max_date", "username", "username
 
 
 ##################################################################################################################
-# 
-# 
-# 
+#
+#
+#
 #         Public functions
-# 
-# 
-# 
+#
+#
+#
 
 def poll():
     """
@@ -413,7 +413,7 @@ def current_user(active_only=False):
 
         if hasattr(g, 'past_user'):
             return g.past_user
-   
+
     # Cached: then use Redis
     session_id = _current_session_id()
     if session_id is None:
@@ -422,7 +422,7 @@ def current_user(active_only=False):
             g.past_user = None
         return None
 
-    user = _current_redis().get_user(session_id, retrieve_past = not active_only)
+    user = _current_redis().get_user(session_id, retrieve_past=not active_only)
     if user is None:
         g.current_user = None
         if not active_only:
@@ -437,7 +437,7 @@ def current_user(active_only=False):
 
     # Finish
     return user
-    
+
 
 def past_user():
     """
@@ -447,21 +447,21 @@ def past_user():
         return g.past_user
 
     session_id = _current_session_id()
-    past_user = _current_redis().get_past_user(session_id)
+    current_past_user = _current_redis().get_past_user(session_id)
 
-    if past_user is None:
+    if current_past_user is None:
         g.past_user = None
         return None
 
-    g.past_user = past_user
+    g.past_user = current_past_user
     return past_user
 
-def requires_login(redirect_back=True, requires_current=False):
+def requires_login(redirect_back=True, current_only=False):
     """
     Decorator. Requires the user to be logged in (and be a current user or not).
 
     @redirect_back: if it's a past user, automatically redirect him to the original link
-    @requires_current: if it's a past_user and redirect_back is False, then act as if he was 
+    @current_only: if it's a past_user and redirect_back is False, then act as if he was
       an invalid user
     """
     def requires_login_decorator(func):
@@ -474,10 +474,10 @@ def requires_login(redirect_back=True, requires_current=False):
                 elif redirect_back:
                     # If past user found, and redirect_back is the policy, return the user
                     return redirect(past_user().back)
-                elif requires_current:
+                elif current_only:
                     # If it requires a current user
                     return _current_weblab()._forbidden_handler()
-                # If the policy is not returning back neither requiring that 
+                # If the policy is not returning back neither requiring that
                 # this is a current user... let it be
             return func(*args, **kwargs)
         return wrapper
@@ -486,10 +486,10 @@ def requires_login(redirect_back=True, requires_current=False):
 
 def requires_current(redirect_back=True):
     """
-    Decorator. Requires the user to be a valid current user. 
+    Decorator. Requires the user to be a valid current user.
     Otherwise, it will call the forbidden behavior.
     """
-    return requires_login(redirect_back=redirect_back, requires_current=True)
+    return requires_login(redirect_back=redirect_back, current_only=True)
 
 def logout():
     """
@@ -500,13 +500,13 @@ def logout():
         _current_redis().force_exit(session_id)
 
 ##################################################################################################################
-# 
-# 
-# 
+#
+#
+#
 #         WebLab blueprint and web methods
-# 
-# 
-# 
+#
+#
+#
 
 _weblab_blueprint = Blueprint("weblab", __name__)
 
@@ -516,9 +516,9 @@ _weblab_blueprint = Blueprint("weblab", __name__)
 def _require_http_credentials():
     """
     All methods coming from WebLab-Deusto must be authenticated (except for /api). Here, it is used the
-    WEBLAB_USERNAME and WEBLAB_PASSWORD configuration variables, which are used by WebLab-Deusto. 
+    WEBLAB_USERNAME and WEBLAB_PASSWORD configuration variables, which are used by WebLab-Deusto.
     Take into account that this username and password authenticate the WebLab-Deusto system, not the user.
-    For example, a WebLab-Deusto in institution A might have 'institutionA' as WEBLAB_USERNAME and some 
+    For example, a WebLab-Deusto in institution A might have 'institutionA' as WEBLAB_USERNAME and some
     randomly generated password as WEBLAB_PASSWORD.
     """
     # Don't require credentials in /api
@@ -539,12 +539,12 @@ def _require_http_credentials():
             error_message = "Invalid credentials: no username provided"
             if provided_username:
                 error_message = "Invalid credentials: wrong username provided. Check the lab logs for further information."
-            return Response(json.dumps(dict(valid=False, error_messages=[error_message])), status=401, headers = {'WWW-Authenticate':'Basic realm="Login Required"', 'Content-Type': 'application/json'})
-        
+            return Response(json.dumps(dict(valid=False, error_messages=[error_message])), status=401, headers={'WWW-Authenticate':'Basic realm="Login Required"', 'Content-Type': 'application/json'})
+
         if expected_username:
             current_app.logger.warning("Invalid credentials provided to access {}. Username provided: {!r} (expected: {!r})".format(request.url, provided_username, expected_username))
 
-        return Response(response=("You don't seem to be a WebLab-Instance"), status=401, headers = {'WWW-Authenticate':'Basic realm="Login Required"'})
+        return Response(response=("You don't seem to be a WebLab-Instance"), status=401, headers={'WWW-Authenticate':'Basic realm="Login Required"'})
 
 
 
@@ -579,23 +579,21 @@ def _start_session():
     # Parse the initial date + assigned time to know the maximum time
     start_date_str = server_initial_data['priority.queue.slot.start']
     start_date_str, microseconds = start_date_str.split('.')
-    start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d %H:%M:%S") + datetime.timedelta(microseconds = int(microseconds))
-    max_date = start_date + datetime.timedelta(seconds = float(server_initial_data['priority.queue.slot.length']))
+    start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d %H:%M:%S") + datetime.timedelta(microseconds=int(microseconds))
+    max_date = start_date + datetime.timedelta(seconds=float(server_initial_data['priority.queue.slot.length']))
 
     # Create a global session
     session_id = str(random.randint(0, 10e8)) # Not especially secure 0:-)
 
     # Prepare adding this to redis
-    max_date_int = _to_timestamp(max_date)
-    
-    user = User(back=request_data['back'], last_poll=_current_timestamp(), max_date = float(_to_timestamp(max_date)), 
-                username=server_initial_data['request.username'], username_unique = server_initial_data['request.username.unique'],
-                exited = False, data = None)
+    user = User(back=request_data['back'], last_poll=_current_timestamp(), max_date=float(_to_timestamp(max_date)),
+                username=server_initial_data['request.username'], username_unique=server_initial_data['request.username.unique'],
+                exited=False, data=None)
 
     redis_manager = _current_redis()
 
-    redis_manager.add_user(session_id, user, expiration = 30 + int(float(server_initial_data['priority.queue.slot.length'])))
-                
+    redis_manager.add_user(session_id, user, expiration=30 + int(float(server_initial_data['priority.queue.slot.length'])))
+
 
     kwargs = {}
     scheme = current_app.config.get(ConfigurationKeys.WEBLAB_SCHEME)
@@ -606,12 +604,12 @@ def _start_session():
     if weblab._on_start:
         try:
             data = weblab._on_start(client_initial_data, server_initial_data, user)
-        except:
+        except Exception:
             traceback.print_exc()
         else:
             redis_manager.update_data(session_id, data)
 
-    link = url_for('callback_url', session_id=session_id, _external = True, **kwargs)
+    link = url_for('callback_url', session_id=session_id, _external=True, **kwargs)
     return jsonify(url=link, session_id=session_id)
 
 
@@ -619,20 +617,20 @@ def _start_session():
 @_weblab_blueprint.route('/sessions/<session_id>/status')
 def _status(session_id):
     """
-    This method provides the current status of a particular 
+    This method provides the current status of a particular
     user.
     """
 
     weblab = _current_weblab()
     redis_manager = weblab.redis_manager
-    user = redis_manager.get_user(session_id, retrieve_past = False)
+    user = redis_manager.get_user(session_id, retrieve_past=False)
     if user is None:
-        return jsonify(should_finish= -1)
+        return jsonify(should_finish=-1)
 
     if user.exited:
-        return jsonify(should_finish= -1)
+        return jsonify(should_finish=-1)
 
-    if weblab.timeout and weblab.timeout > 0: 
+    if weblab.timeout and weblab.timeout > 0:
         # If timeout is set to -1, it will never timeout (unless user exited)
         if user.time_without_polling() >= weblab.timeout:
             return jsonify(should_finish=-1)
@@ -652,24 +650,24 @@ def _dispose_experiment(session_id):
     is over.
     """
     request_data = request.get_json(force=True)
-    if 'action' not in request_data: 
+    if 'action' not in request_data:
         return jsonify(message="Unknown op")
-    
+
     if request_data['action'] != 'delete':
         return jsonify(message="Unknown op")
-    
+
     try:
         _dispose_user(session_id)
     except _NotFoundError:
         return jsonify(message="Not found")
-    
+
     return jsonify(message="Deleted")
 
 
 ######################################################################################
-# 
+#
 #     Redis Management
-# 
+#
 
 
 class _RedisManager(object):
@@ -702,7 +700,7 @@ class _RedisManager(object):
         if max_date is None: # Object had been removed
             self.client.delete(key)
 
-    def get_user(self, session_id, retrieve_past = False):
+    def get_user(self, session_id, retrieve_past=False):
         pipeline = self.client.pipeline()
         key = 'weblab:active:{}'.format(session_id)
         for name in 'back', 'last_poll', 'max_date', 'username', 'username-unique', 'data', 'exited':
@@ -727,16 +725,16 @@ class _RedisManager(object):
             return PastUser(back=back, max_date=float(max_date), username=username, username_unique=username_unique, data=json.loads(data))
 
     def delete_user(self, session_id, past_user):
-        if self.client.hget('weblab:active:{}'.format(session_id)), "max_date") is None:
+        if self.client.hget('weblab:active:{}'.format(session_id), "max_date") is None:
             return False
-        
-        # 
+
+        #
         # If two processes at the same time call delete() and establish the same second,
         # it's not a big deal (as long as only one calls _on_delete later).
-        # 
+        #
         pipeline = self.client.pipeline()
         pipeline.delete("weblab:active:{}".format(session_id))
-    
+
         key = 'weblab:inactive:{}'.format(session_id)
 
         pipeline.hset(key, "back", past_user.back)
@@ -750,11 +748,11 @@ class _RedisManager(object):
         pipeline.expire("weblab:inactive:{}".format(session_id), current_app.config.get(ConfigurationKeys.WEBLAB_PAST_USERS_TIMEOUT, 3600))
         results = pipeline.execute()
 
-        return row[0] != 0 # If redis returns 0 on delete() it means that it was not deleted
+        return results[0] != 0 # If redis returns 0 on delete() it means that it was not deleted
 
     def force_exit(self, session_id):
         """
-        If the user logs out, or closes the window, we have to report 
+        If the user logs out, or closes the window, we have to report
         WebLab-Deusto.
         """
         pipeline = self.client.pipeline()
@@ -770,15 +768,15 @@ class _RedisManager(object):
 
         for active_key in self.client.keys('weblab:active:*'):
             session_id = active_key[len('weblab:active:'):]
-            current_user = self.get_user(session_id, retrieve_past = False)
-            if current_user:
-                if current_user.time_left() <= 0:
+            user = self.get_user(session_id, retrieve_past=False)
+            if user:
+                if user.time_left() <= 0:
                     expired_sessions.append(session_id)
-        
+
         return expired_sessions
 
-    def session_exists(self, session_id, retrieve_past = True):
-        return self.get_user(session_id, retrieve_past = retrieve_past) is not None
+    def session_exists(self, session_id, retrieve_past=True):
+        return self.get_user(session_id, retrieve_past=retrieve_past) is not None
 
     def poll(self, session_id):
         key = 'weblab:active:{}'.format(session_id)
@@ -795,11 +793,11 @@ class _RedisManager(object):
 
 
 ######################################################################################
-# 
-# 
+#
+#
 #     Auxiliar private functions
-# 
-# 
+#
+#
 
 def _current_weblab():
     if 'weblab' not in current_app.extensions:
@@ -824,15 +822,15 @@ def _dispose_user(session_id):
     if user is None:
         raise _NotFoundError()
 
-    past_user = user.to_past_user()
-    deleted = redis_manager.delete_user(session_id, past_user)
-    
+    current_past_user = user.to_past_user()
+    deleted = redis_manager.delete_user(session_id, current_past_user)
+
     if deleted:
         weblab = _current_weblab()
         if weblab._on_dispose:
             try:
                 weblab._on_dispose(user)
-            except:
+            except Exception:
                 traceback.print_exc()
 
 def _clean_expired_users():
@@ -842,7 +840,7 @@ def _clean_expired_users():
             _dispose_user(session_id)
         except _NotFoundError:
             pass
-        except:
+        except Exception:
             traceback.print_exc()
 
 class _CleanerThread(threading.Thread):
@@ -851,7 +849,7 @@ class _CleanerThread(threading.Thread):
     """
 
     def __init__(self, app):
-        super(_Cleaner, self).__init__()
+        super(_CleanerThread, self).__init__()
         self.app = app
         self.name = "WebLabCleaner"
         self.daemon = True
@@ -862,9 +860,8 @@ class _CleanerThread(threading.Thread):
             try:
                 with self.app.app_context():
                     _clean_expired_users()
-            except:
+            except Exception:
                 traceback.print_exc()
 
 class _NotFoundError(Exception):
     pass
-
