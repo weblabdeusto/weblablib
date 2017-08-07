@@ -6,7 +6,9 @@ import time
 import redis
 import random
 import datetime
+import threading
 import traceback
+
 from functools import wraps
 from collections import namedtuple
 from flask import Blueprint, jsonify, request, current_app, Response, redirect, url_for, g, session, after_this_request, redirect
@@ -78,6 +80,19 @@ class ConfigurationKeys(object):
     # Establish in seconds in how long (defaults to 3600, which is one hour)
     WEBLAB_PAST_USERS_TIMEOUT = 'WEBLAB_PAST_USERS_TIMEOUT'
 
+    # In some rare occasions, it may happen that the dispose method is not called. 
+    # For example, if the Experiment server suddenly has no internet for a temporary
+    # error, the user will not call logout, and WebLab-Deusto may fail to communicate
+    # that the user has finished, and store that it has finished internally in 
+    # WebLab-Deusto. For some laboratories, it's important to be extra cautious and
+    # make sure that someone calls the _dispose method. To do so, you may call
+    # directly "flask clean_expired_users" manually (and cron it), or you may just
+    # leave this option as True, which is the default behavior, and it will create
+    # a thread that will be in a loop. If you have 10 gunicorn workers, there will 
+    # be 10 threads, but it shouldn't be a problem since they're synchronized with
+    # Redis internally.
+    WEBLAB_AUTOCLEAN_THREAD = 'WEBLAB_AUTOCLEAN_THREAD'
+
 
 
 #############################################################
@@ -119,6 +134,7 @@ class WebLab(object):
         self._session_id_name = 'weblab_session_id' # overrided by WEBLAB_SESSION_ID_NAME
         self._redirection_on_forbiden = None
         self._template_on_forbiden = None
+        self._cleaner_thread = None
 
         self._on_start = None
         self._on_dispose = None
@@ -134,6 +150,9 @@ class WebLab(object):
         """
         if self._initialized:
             return
+
+        if app is None:
+            raise ValueError("app must be a Flask app")
 
         self._app = app
         
@@ -226,6 +245,15 @@ class WebLab(object):
         for key in 'WEBLAB_USERNAME', 'WEBLAB_PASSWORD':
             if key not in self._app.config:
                 raise ValueError("Invalid configuration. Missing {}".format(key))
+        
+        if hasattr(app, 'cli'):
+            @self._app.cli.command()
+            def clean_expired_users():
+                _clean_expired_users()
+
+        if self._app.config.get('WEBLAB_AUTOCLEAN_THREAD', True):
+            self._cleaner_thread = _CleanerThread(self._app)
+            self._cleaner_thread.start()
 
         self._initialized = True
 
@@ -629,25 +657,13 @@ def _dispose_experiment(session_id):
     
     if request_data['action'] != 'delete':
         return jsonify(message="Unknown op")
-
-    redis_manager = _current_redis()
-    user = redis_manager.get_user(session_id, retrieve_past=False)
-    if user is None:
-        return jsonify(message="Not found")
-
-    past_user = user.to_past_user()
-    deleted = redis_manager.delete_user(session_id, past_user)
     
-    if deleted:
-        weblab = _current_weblab()
-        if weblab._on_dispose:
-            try:
-                weblab._on_dispose(user)
-            except:
-                traceback.print_exc()
-
+    try:
+        _dispose_user(session_id)
+    except _NotFoundError:
+        return jsonify(message="Not found")
+    
     return jsonify(message="Deleted")
-
 
 
 ######################################################################################
@@ -746,7 +762,20 @@ class _RedisManager(object):
         pipeline.hset("weblab:active:{}".format(session_id), "exited", "true")
         max_date, _ = pipeline.execute()
         if max_date is None:
+            # If max_date is None it means that it had been previously deleted
             self.client.delete("weblab:active:{}".format(session_id))
+
+    def find_expired_sessions(self):
+        expired_sessions = []
+
+        for active_key in self.client.keys('weblab:active:*'):
+            session_id = active_key[len('weblab:active:'):]
+            current_user = self.get_user(session_id, retrieve_past = False)
+            if current_user:
+                if current_user.time_left() <= 0:
+                    expired_sessions.append(session_id)
+        
+        return expired_sessions
 
     def session_exists(self, session_id, retrieve_past = True):
         return self.get_user(session_id, retrieve_past = retrieve_past) is not None
@@ -788,4 +817,54 @@ def _to_timestamp(dt):
 
 def _current_timestamp():
     return float(_to_timestamp(datetime.datetime.now()))
+
+def _dispose_user(session_id):
+    redis_manager = _current_redis()
+    user = redis_manager.get_user(session_id, retrieve_past=False)
+    if user is None:
+        raise _NotFoundError()
+
+    past_user = user.to_past_user()
+    deleted = redis_manager.delete_user(session_id, past_user)
+    
+    if deleted:
+        weblab = _current_weblab()
+        if weblab._on_dispose:
+            try:
+                weblab._on_dispose(user)
+            except:
+                traceback.print_exc()
+
+def _clean_expired_users():
+    redis_manager = _current_redis()
+    for session_id in redis_manager.find_expired_sessions():
+        try:
+            _dispose_user(session_id)
+        except _NotFoundError:
+            pass
+        except:
+            traceback.print_exc()
+
+class _CleanerThread(threading.Thread):
+    """
+    _CleanerThread is a thread that keeps calling the _clean_expired_users. It is optional, activated with WEBLAB_AUTOCLEAN_THREAD
+    """
+
+    def __init__(self, app):
+        super(_Cleaner, self).__init__()
+        self.app = app
+        self.name = "WebLabCleaner"
+        self.daemon = True
+
+    def run(self):
+        while True:
+            time.sleep(5)
+            try:
+                with self.app.app_context():
+                    _clean_expired_users()
+            except:
+                traceback.print_exc()
+
+class _NotFoundError(Exception):
+    pass
 
