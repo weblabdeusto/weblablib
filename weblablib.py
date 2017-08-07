@@ -13,8 +13,6 @@ from flask import Blueprint, jsonify, request, current_app, Response, redirect, 
 
 # 
 # TODO: make sure the user is out
-# TODO: migrate all redis code (from the blueprint) to the RedisManager
-# TODO: make sure dates in redis are converted to float, etc.
 # 
 class ConfigurationKeys(object):
 
@@ -56,7 +54,8 @@ class ConfigurationKeys(object):
     WEBLAB_REDIS_URL = 'WEBLAB_REDIS_URL'
 
     # Number of seconds. If the user does not poll in that time, we consider
-    # that he will be kicked out. Defaults to 15 seconds.
+    # that he will be kicked out. Defaults to 15 seconds. It can be set
+    # to -1 to disable the timeout (and therefore polling makes no sense)
     WEBLAB_TIMEOUT = 'WEBLAB_TIMEOUT'
 
     # Automatically poll in every method. By default it's true. So any call 
@@ -156,7 +155,7 @@ class WebLab(object):
         # Initialize session settings
         # 
         self._session_id_name = self._app.config.get(ConfigurationKeys.WEBLAB_SESSION_ID_NAME, 'weblab_session_id')
-        self.timeout = self._app.config.get(ConfigurationKeys.WEBLAB_TIMEOUT, 15) # TODO: Not used yet
+        self.timeout = self._app.config.get(ConfigurationKeys.WEBLAB_TIMEOUT, 15)
         autopoll = self._app.config.get(ConfigurationKeys.WEBLAB_AUTOPOLL, True)
         self._redirection_on_forbiden = self._app.config.get(ConfigurationKeys.WEBLAB_UNAUTHORIZED_LINK)
         self._template_on_forbiden = self._app.config.get(ConfigurationKeys.WEBLAB_UNAUTHORIZED_TEMPLATE)
@@ -308,13 +307,22 @@ class User(namedtuple("User", ["back", "last_poll", "max_date", "username", "use
     """
     @property
     def time_without_polling(self):
-        return float(_current_timestamp()) - float(self.last_poll)
+        """
+        Seconds without polling
+        """
+        return _current_timestamp() - self.last_poll
 
     @property
     def time_left(self):
-        return float(self.max_date) - float(_current_timestamp())
+        """
+        Seconds left (0 if time passed)
+        """
+        return max(0, self.max_date - _current_timestamp())
 
     def to_past_user(self):
+        """
+        Create a PastUser based on the data of the user
+        """
         return PastUser(back=self.back, max_date=self.max_date, username=self.username, username_unique=self.username_unique, data=self.data)
 
     active = True # Is the user an active user or a PastUser?
@@ -552,7 +560,7 @@ def _start_session():
     # Prepare adding this to redis
     max_date_int = _to_timestamp(max_date)
     
-    user = User(back=request_data['back'], last_poll=_current_timestamp(), max_date = _to_timestamp(max_date), 
+    user = User(back=request_data['back'], last_poll=_current_timestamp(), max_date = float(_to_timestamp(max_date)), 
                 username=server_initial_data['request.username'], username_unique = server_initial_data['request.username.unique'],
                 exited = False, data = None)
 
@@ -587,9 +595,8 @@ def _status(session_id):
     user.
     """
 
-    # TODO: let the admin say that the time is forever
-
-    redis_manager = _current_redis()
+    weblab = _current_weblab()
+    redis_manager = weblab.redis_manager
     user = redis_manager.get_user(session_id, retrieve_past = False)
     if user is None:
         return jsonify(should_finish= -1)
@@ -597,14 +604,16 @@ def _status(session_id):
     if user.exited:
         return jsonify(should_finish= -1)
 
-    if user.time_without_polling() >= 15: # TODO: use timeout
-        return jsonify(should_finish=-1)
+    if weblab.timeout and weblab.timeout > 0: 
+        # If timeout is set to -1, it will never timeout (unless user exited)
+        if user.time_without_polling() >= weblab.timeout:
+            return jsonify(should_finish=-1)
 
     if user.time_left() <= 0:
         return jsonify(should_finish=-1)
 
     current_app.logger.debug("User {} still has {} seconds".format(user.username, user.time_left()))
-    return jsonify(should_finish=5)
+    return jsonify(should_finish=min(5, int(user.time_left())))
 
 
 @_weblab_blueprint.route('/sessions/<session_id>', methods=['POST'])
@@ -625,17 +634,17 @@ def _dispose_experiment(session_id):
     user = redis_manager.get_user(session_id, retrieve_past=False)
     if user is None:
         return jsonify(message="Not found")
-        
-    weblab = _current_weblab()
-    if weblab._on_dispose:
-        try:
-            _current_weblab()._on_dispose(user)
-        except:
-            traceback.print_exc()
-    
-    # TODO: make this earlier: never call on_dispose twice
+
     past_user = user.to_past_user()
-    redis_manager.delete_user(session_id, past_user)
+    deleted = redis_manager.delete_user(session_id, past_user)
+    
+    if deleted:
+        weblab = _current_weblab()
+        if weblab._on_dispose:
+            try:
+                weblab._on_dispose(user)
+            except:
+                traceback.print_exc()
 
     return jsonify(message="Deleted")
 
@@ -685,7 +694,7 @@ class _RedisManager(object):
         back, last_poll, max_date, username, username_unique, data, exited = pipeline.execute()
 
         if max_date is not None:
-            return User(back=back, last_poll=last_poll, max_date=max_date, username=username, username_unique=username_unique, data=json.loads(data), exited=json.loads(exited))
+            return User(back=back, last_poll=float(last_poll), max_date=float(max_date), username=username, username_unique=username_unique, data=json.loads(data), exited=json.loads(exited))
 
         if retrieve_past:
             return self.get_past_user(session_id)
@@ -699,12 +708,19 @@ class _RedisManager(object):
         back, max_date, username, username_unique, data = pipeline.execute()
 
         if max_date is not None:
-            return PastUser(back=back, max_date=max_date, username=username, username_unique=username_unique, data=json.loads(data))
+            return PastUser(back=back, max_date=float(max_date), username=username, username_unique=username_unique, data=json.loads(data))
 
     def delete_user(self, session_id, past_user):
+        if self.client.hget('weblab:active:{}'.format(session_id)), "max_date") is None:
+            return False
+        
+        # 
+        # If two processes at the same time call delete() and establish the same second,
+        # it's not a big deal (as long as only one calls _on_delete later).
+        # 
         pipeline = self.client.pipeline()
         pipeline.delete("weblab:active:{}".format(session_id))
-        
+    
         key = 'weblab:inactive:{}'.format(session_id)
 
         pipeline.hset(key, "back", past_user.back)
@@ -716,7 +732,9 @@ class _RedisManager(object):
         # During half an hour after being created, the user is redirected to
         # the original URL. After that, every record of the user has been deleted
         pipeline.expire("weblab:inactive:{}".format(session_id), current_app.config.get(ConfigurationKeys.WEBLAB_PAST_USERS_TIMEOUT, 3600))
-        pipeline.execute()
+        results = pipeline.execute()
+
+        return row[0] != 0 # If redis returns 0 on delete() it means that it was not deleted
 
     def force_exit(self, session_id):
         """
@@ -730,32 +748,16 @@ class _RedisManager(object):
         if max_date is None:
             self.client.delete("weblab:active:{}".format(session_id))
 
-    def seconds_left(self, session_id): #TODO: NOT USED YET
-        """
-        How much time does the current user have, in seconds
-        """
-        current_time = float(_current_timestamp())
-
-        max_date = self.client.hget("weblab:active:{}".format(session_id), "max_date")
-        if max_date is None:
-            return 0
-
-        left = float(max_date) - current_time
-        if left <= 0:
-            return 0
-
-        return left
-    
     def session_exists(self, session_id, retrieve_past = True):
         return self.get_user(session_id, retrieve_past = retrieve_past) is not None
 
     def poll(self, session_id):
         key = 'weblab:active:{}'.format(session_id)
 
-        last_poll_int = _current_timestamp()
+        last_poll = _current_timestamp()
         pipeline = self.client.pipeline()
         pipeline.hget(key, "max_date")
-        pipeline.hset(key, "last_poll", last_poll_int)
+        pipeline.hset(key, "last_poll", last_poll)
         max_date, _ = pipeline.execute()
 
         if max_date is None:
@@ -785,5 +787,5 @@ def _to_timestamp(dt):
     return str(int(time.mktime(dt.timetuple()))) + str(dt.microsecond / 1e6)[1:]
 
 def _current_timestamp():
-    return _to_timestamp(datetime.datetime.now())
+    return float(_to_timestamp(datetime.datetime.now()))
 
