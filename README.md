@@ -45,3 +45,8 @@ if __name__ == '__main__':
 
 See further examples in the ``examples`` directory.
 
+## Advance usage
+
+Read the docs: https://weblablib.readthedocs.io
+
+
