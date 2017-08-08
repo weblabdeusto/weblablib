@@ -19,9 +19,9 @@ provides:
    that WebLab-Deusto uses. It also allows you to define what methods should be call on the 
    beginning and end of the user session.
 
- * A set of methods to access information about the current information, such as ``current_user``,
-   ``past_user`` (if the user is not active anymore), ``requires_login`` (for methods which should
-   never be used by anonymous users), ``requires_current`` (for methods which should only be 
+ * A set of methods to access information about the current information, such as ``weblab_user``,
+   (which can be anonymous or not, active or not), ``requires_login`` (for methods which should
+   never be used by anonymous users), ``requires_active`` (for methods which should only be 
    used by users who are supposed to be using the laboratory now), ``poll`` (to report WebLab
    that the user is still active) or ``logout`` (to report WebLab that the user left).
 
@@ -31,6 +31,7 @@ Please, check the examples in the examples folder in the github repo.
 from __future__ import unicode_literals, print_function, division
 
 import os
+import abc
 import sys
 import json
 import time
@@ -40,16 +41,18 @@ import threading
 import traceback
 
 from functools import wraps
-from collections import namedtuple
 
 import redis
 
+from werkzeug import LocalProxy
 from flask import Blueprint, Response, jsonify, request, current_app, redirect, \
      url_for, g, session, after_this_request, render_template
 
-__all__ = ['WebLab', 'poll', 'current_user', 'past_user', 
-            'requires_login', 'requires_current',
-            'logout']
+__all__ = ['WebLab', 
+            'logout', 'poll', 
+            'weblab_user', 
+            'requires_login', 'requires_active', 
+            'CurrentUser', 'AnonymousUser', 'PastUser']
 
 
 class ConfigurationKeys(object):
@@ -328,7 +331,7 @@ class WebLab(object):
         Register a method for being called when a new user comes. The format is:
 
         def start(client_data, server_data, user):
-            return data # simple data, e.g., None, a dict, a list... that will be available as current_user().data
+            return data # simple data, e.g., None, a dict, a list... that will be available as weblab_user.data
 
         """
         if self._on_start is not None:
@@ -510,11 +513,6 @@ class PastUser(WebLabUser):
     def data(self):
         return self._data
 
-    @data.setter
-    def data(self, data):
-        self._redis_manager.update_data(self._session_id, data)
-        self._data = data
-
     @property
     def active(self):
         return False
@@ -555,65 +553,32 @@ def poll():
         g.poll_requested = True
 
 
-def current_user(active_only=False):
+def _weblab_user():
     """
     Get the current user. Optionally, return the PastUser if the current one expired.
 
     @active_only: if set to True, do not return a past user (and None instead)
     """
 
-    # Cached: first check
-    if active_only:
-        if hasattr(g, 'current_user'):
-            return g.current_user
-    else:
-        if hasattr(g, 'current_user'):
-            return g.current_user
-
-        if hasattr(g, 'past_user'):
-            return g.past_user
+    if hasattr(g, 'weblab_user'):
+        return g.weblab_user
 
     # Cached: then use Redis
     session_id = _current_session_id()
     if session_id is None:
-        g.current_user = None
-        if not active_only:
-            g.past_user = None
+        g.weblab_user = AnonymousUser()
         return None
 
-    user = _current_redis().get_user(session_id, retrieve_past=not active_only)
-    if user is None:
-        g.current_user = None
-        if not active_only:
-            g.past_user = None
-        return None
+    user = _current_redis().get_user(session_id)
+    if user.is_anonymous:
+        g.weblab_user = AnonymousUser()
+        return g.weblab_user
 
     # Store it for next requests in the same call
-    if user.active:
-        g.current_user = user
-    else:
-        g.past_user = user
-
-    # Finish
+    g.weblab_user = user
     return user
 
-
-def past_user():
-    """
-    Get the past user (if the session has expired for the current user).
-    """
-    if hasattr(g, 'past_user'):
-        return g.past_user
-
-    session_id = _current_session_id()
-    current_past_user = _current_redis().get_past_user(session_id)
-
-    if current_past_user is None:
-        g.past_user = None
-        return None
-
-    g.past_user = current_past_user
-    return past_user
+weblab_user = LocalProxy(_weblab_user)
 
 def requires_login(redirect_back=True, current_only=False):
     """
@@ -626,13 +591,13 @@ def requires_login(redirect_back=True, current_only=False):
     def requires_login_decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if current_user() is None:
-                if past_user() is None:
-                    # If no past user or current user: forbidden
+            if not weblab_user.active:
+                if weblab_user.is_anonymous:
+                    # If anonymous user: forbidden
                     return _current_weblab()._forbidden_handler()
                 elif redirect_back:
                     # If past user found, and redirect_back is the policy, return the user
-                    return redirect(past_user().back)
+                    return redirect(weblab_user.back)
                 elif current_only:
                     # If it requires a current user
                     return _current_weblab()._forbidden_handler()
@@ -643,7 +608,7 @@ def requires_login(redirect_back=True, current_only=False):
 
     return requires_login_decorator
 
-def requires_current(redirect_back=True):
+def requires_active(redirect_back=True):
     """
     Decorator. Requires the user to be a valid current user.
     Otherwise, it will call the forbidden behavior.
@@ -783,8 +748,8 @@ def _status(session_id):
 
     weblab = _current_weblab()
     redis_manager = weblab.redis_manager
-    user = redis_manager.get_user(session_id, retrieve_past=False)
-    if user is None:
+    user = redis_manager.get_user(session_id)
+    if user.is_anonymous or not user.active:
         return jsonify(should_finish=-1)
 
     if user.exited:
@@ -860,7 +825,7 @@ class _RedisManager(object):
         if max_date is None: # Object had been removed
             self.client.delete(key)
 
-    def get_user(self, session_id, retrieve_past=False):
+    def get_user(self, session_id, retrieve_past=True):
         pipeline = self.client.pipeline()
         key = 'weblab:active:{}'.format(session_id)
         for name in 'back', 'last_poll', 'max_date', 'username', 'username-unique', 'data', 'exited':
@@ -876,6 +841,8 @@ class _RedisManager(object):
         if retrieve_past:
             return self.get_past_user(session_id)
 
+        return AnonymousUser()
+
     def get_past_user(self, session_id):
         pipeline = self.client.pipeline()
         key = 'weblab:inactive:{}'.format(session_id)
@@ -888,6 +855,8 @@ class _RedisManager(object):
             return PastUser(session_id=session_id, back=back, max_date=float(max_date), 
                             username=username, username_unique=username_unique, 
                             data=json.loads(data))
+
+        return AnonymousUser()
 
     def delete_user(self, session_id, past_user):
         if self.client.hget('weblab:active:{}'.format(session_id), "max_date") is None:
@@ -934,7 +903,7 @@ class _RedisManager(object):
         for active_key in self.client.keys('weblab:active:*'):
             session_id = active_key[len('weblab:active:'):]
             user = self.get_user(session_id, retrieve_past=False)
-            if user:
+            if user.active: # Double check: he might be deleted in the meanwhile
                 if user.time_left() <= 0:
                     expired_sessions.append(session_id)
 
@@ -983,9 +952,12 @@ def _current_timestamp():
 
 def _dispose_user(session_id):
     redis_manager = _current_redis()
-    user = redis_manager.get_user(session_id, retrieve_past=False)
-    if user is None:
+    user = redis_manager.get_user(session_id)
+    if user.is_anonymous:
         raise _NotFoundError()
+
+    if not user.active:
+        return
 
     current_past_user = user.to_past_user()
     deleted = redis_manager.delete_user(session_id, current_past_user)
