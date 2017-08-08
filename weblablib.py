@@ -277,7 +277,7 @@ class WebLab(object):
                 if not poll_requested:
                     session_id = _current_session_id()
                     if session_id:
-                        _current_redis().poll(session_id)
+                        self._redis_manager.poll(session_id)
 
                 return response
 
@@ -291,7 +291,55 @@ class WebLab(object):
         if hasattr(app, 'cli'):
             @self._app.cli.command()
             def clean_expired_users():
-                _clean_expired_users()
+                self.clean_expired_users()
+
+            @self._app.cli.command()
+            @self._app.cli.option('--name', default='John Smith', help="First and last name")
+            @self._app.cli.option('--username', default='john.smith', help="Username passed")
+            @self._app.cli.option('--username-unique', default='john.smith@institution', help="Unique username passed")
+            @self._app.cli.option('--time', default=300, help="Time in seconds passed to the laboratory")
+            @self._app.cli.option('--back', default='http://weblab.deusto.es', help="URL to send the user back")
+            @self._app.cli.option('--open-browser', default=False, help="Open the fake use in a web browser")
+            def fake_user(name, username, username_unique, time, back, open_browser):
+                time = float(time)
+                
+                start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
+
+                request_data = json.dumps({
+                    'client_initial_data': {},
+                    'server_initial_data': {
+                        'priority.queue.slot.start': start_time,
+                        'priority.queue.slot.length': time,
+                        'request.username': username,
+                        'request.username.unique': username_unique,
+                    },
+                    'back': back,
+                })
+                result = _process_start_request(request_data)
+                print("Open: {}".format(result['url']))
+                print("Session identifier: {}\n".format(result['session_id']))
+                open(".fake_weblab_user_session_id", 'w').write(result['session_id'])
+                print("Now you can make calls as if you were WebLab-Deusto:")
+                print(" - flask fake_status")
+                print(" - flask fake_dispose")
+                if open_browser:
+                    webbrowser.open(result['url'])
+
+            @self._app.cli.command()
+            def fake_status():
+                if not os.path.exists('.fake_weblab_user_session_id'):
+                    print("Session not found. Did you call fake_user first?")
+                    return
+                session_id = open('.fake_weblab_user_session_id').read()
+                pass
+
+            @self._app.cli.command()
+            def fake_dispose():
+                if not os.path.exists('.fake_weblab_user_session_id'):
+                    print("Session not found. Did you call fake_user first?")
+                    return
+                session_id = open('.fake_weblab_user_session_id').read()
+                pass
 
         if self._app.config.get('WEBLAB_AUTOCLEAN_THREAD', True):
             self._cleaner_thread = _CleanerThread(self._app)
@@ -353,6 +401,23 @@ class WebLab(object):
         self._on_dispose = func
         return func
 
+    def clean_expired_users(self):
+        """
+        Typically, users are deleted by WebLab-Deusto calling the dispose method.
+        However, in some conditions (e.g., restarting WebLab), the dispose method
+        might not be called, and the laboratory can end in a wrong state. So as to
+        avoid this, weblablib provides three systems:
+        1. A command flask clean_expired_users.
+        2. A thread that by default is running which calls this method every few seconds.
+        3. This API method, available as: weblab.clean_expired_users()
+        """
+        for session_id in self._redis_manager.find_expired_sessions():
+            try:
+                _dispose_user(session_id)
+            except _NotFoundError:
+                pass
+            except Exception:
+                traceback.print_exc()
 
 ##################################################################################################################
 #
@@ -694,7 +759,10 @@ def _start_session():
     Create a new session: WebLab-Deusto is telling us that a new user is coming. We register the user in the redis system.
     """
     request_data = request.get_json(force=True)
+    return jsonify(**_process_start_request(request_data))
 
+def _process_start_request(request_data):
+    """ Auxiliar method, called also from the Flask CLI to fake_user """
     client_initial_data = request_data['client_initial_data']
     server_initial_data = request_data['server_initial_data']
 
@@ -734,7 +802,7 @@ def _start_session():
             redis_manager.update_data(session_id, data)
 
     link = url_for('callback_url', session_id=session_id, _external=True, **kwargs)
-    return jsonify(url=link, session_id=session_id)
+    return dict(url=link, session_id=session_id)
 
 
 
@@ -971,16 +1039,6 @@ def _dispose_user(session_id):
             except Exception:
                 traceback.print_exc()
 
-def _clean_expired_users():
-    redis_manager = _current_redis()
-    for session_id in redis_manager.find_expired_sessions():
-        try:
-            _dispose_user(session_id)
-        except _NotFoundError:
-            pass
-        except Exception:
-            traceback.print_exc()
-
 class _CleanerThread(threading.Thread):
     """
     _CleanerThread is a thread that keeps calling the _clean_expired_users. It is optional, activated with WEBLAB_AUTOCLEAN_THREAD
@@ -997,7 +1055,7 @@ class _CleanerThread(threading.Thread):
             time.sleep(5)
             try:
                 with self.app.app_context():
-                    _clean_expired_users()
+                    _current_weblab().clean_expired_users()
             except Exception:
                 traceback.print_exc()
 
