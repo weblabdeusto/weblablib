@@ -566,15 +566,13 @@ def _weblab_user():
     # Cached: then use Redis
     session_id = _current_session_id()
     if session_id is None:
-        g.weblab_user = AnonymousUser()
-        return None
+        return _set_weblab_user_cache(AnonymousUser())
 
     user = _current_redis().get_user(session_id)
-    if user.is_anonymous:
-        g.weblab_user = AnonymousUser()
-        return g.weblab_user
-
     # Store it for next requests in the same call
+    return _set_weblab_user_cache(user)
+
+def _set_weblab_user_cache(user):
     g.weblab_user = user
     return user
 
@@ -727,6 +725,7 @@ def _start_session():
 
     weblab = _current_weblab()
     if weblab._on_start:
+        _set_weblab_user_cache(user)
         try:
             data = weblab._on_start(client_initial_data, server_initial_data, user)
         except Exception:
@@ -966,6 +965,7 @@ def _dispose_user(session_id):
     if deleted:
         weblab = _current_weblab()
         if weblab._on_dispose:
+            _set_weblab_user_cache(user)
             try:
                 weblab._on_dispose(user)
             except Exception:
