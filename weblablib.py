@@ -30,10 +30,11 @@ Please, check the examples in the examples folder in the github repo.
 
 from __future__ import unicode_literals, print_function, division
 
+import os
 import sys
 import json
 import time
-import random
+import base64
 import datetime
 import threading
 import traceback
@@ -359,7 +360,30 @@ class WebLab(object):
 #
 #
 
-class User(namedtuple("User", ["back", "last_poll", "max_date", "username", "username_unique", "exited", "data"])):
+class WebLabUser(object):
+    """
+    Abstract representation of a WebLabUser
+    """
+    __metaclass__ = abc.ABCMeta
+
+    @abc.abstractproperty
+    def active(self):
+        """Is the user active right now or not?"""
+
+    @abc.abstractproperty
+    def is_anonymous(self):
+        """Was the user a valid user recently?"""
+
+class AnonymousUser(WebLabUser):
+    @property
+    def active(self):
+        return False
+
+    @property
+    def is_anonymous(self):
+        return True
+
+class CurrentUser(WebLabUser):
     """
     This class represents a user which is still actively using a laboratory. If the session expires, it will become a PastUser.
 
@@ -371,6 +395,55 @@ class User(namedtuple("User", ["back", "last_poll", "max_date", "username", "use
     exited: the user left the laboratory (e.g., he closed the window or a timeout happened).
     data: Serialized data (simple JSON data: dicts, list...) that can be stored for the context of the current user.
     """
+
+    def __init__(self, session_id, back, last_poll, max_date, username, username_unique, exited, data):
+        self._session_id = session_id
+        self._back = back
+        self._last_poll = last_poll
+        self._max_date = max_date
+        self._username = username
+        self._username_unique = username_unique
+        self._exited = exited
+        self._data = data
+
+    @property
+    def back(self):
+        return self._back
+
+    @property
+    def last_poll(self):
+        return self._last_poll
+
+    @property
+    def session_id(self):
+        return self._session_id
+
+    @property
+    def max_date(self):
+        return self._max_date
+
+    @property
+    def username(self):
+        return self._username
+
+    @property
+    def username_unique(self):
+        return self._username_unique
+
+    @property
+    def exited(self):
+        return self._exited
+
+    @property
+    def data(self):
+        return self._data
+
+    @data.setter
+    def data(self, data):
+        redis_manager = _current_redis()
+        redis_manager.update_data(self._session_id, data)
+        self._data = data
+
     @property
     def time_without_polling(self):
         """
@@ -389,18 +462,66 @@ class User(namedtuple("User", ["back", "last_poll", "max_date", "username", "use
         """
         Create a PastUser based on the data of the user
         """
-        return PastUser(back=self.back, max_date=self.max_date, username=self.username, username_unique=self.username_unique, data=self.data)
+        return PastUser(session_id=self._session_id, back=self._back, max_date=self._max_date, username=self._username, username_unique=self._username_unique, data=self._data)
 
-    active = True # Is the user an active user or a PastUser?
+    @property
+    def active(self):
+        return True
 
-class PastUser(namedtuple("PastUser", ["back", "max_date", "username", "username_unique", "data"])):
+    @property
+    def is_anonymous(self):
+        return False
+
+class PastUser(WebLabUser):
     """
     This class represents a user which has been kicked out already. Typically this PastUser is kept in redis for around an hour.
 
     All the fields are same as in User.
     """
-    active = False # Is the user an active user or a PastUser?
+    def __init__(self, session_id, back, max_date, username, username_unique, data):
+        self._session_id = session_id
+        self._back = back
+        self._max_date = max_date
+        self._username = username
+        self._username_unique = username_unique
+        self._data = data
 
+    @property
+    def back(self):
+        return self._back
+
+    @property
+    def session_id(self):
+        return self._session_id
+
+    @property
+    def max_date(self):
+        return self._max_date
+
+    @property
+    def username(self):
+        return self._username
+
+    @property
+    def username_unique(self):
+        return self._username_unique
+
+    @property
+    def data(self):
+        return self._data
+
+    @data.setter
+    def data(self, data):
+        self._redis_manager.update_data(self._session_id, data)
+        self._data = data
+
+    @property
+    def active(self):
+        return False
+
+    @property
+    def is_anonymous(self):
+        return False
 
 ##################################################################################################################
 #
@@ -621,10 +742,11 @@ def _start_session():
     max_date = start_date + datetime.timedelta(seconds=float(server_initial_data['priority.queue.slot.length']))
 
     # Create a global session
-    session_id = str(random.randint(0, 10e8)) # Not especially secure 0:-)
+    tok = os.urandom(32)
+    session_id = base64.urlsafe_b64encode(tok).strip().replace('=', '').replace('-', '_').decode('utf8')
 
     # Prepare adding this to redis
-    user = User(back=request_data['back'], last_poll=_current_timestamp(), max_date=float(_to_timestamp(max_date)),
+    user = CurrentUser(session_id=session_id, back=request_data['back'], last_poll=_current_timestamp(), max_date=float(_to_timestamp(max_date)),
                 username=server_initial_data['request.username'], username_unique=server_initial_data['request.username.unique'],
                 exited=False, data=None)
 
@@ -746,7 +868,10 @@ class _RedisManager(object):
         back, last_poll, max_date, username, username_unique, data, exited = pipeline.execute()
 
         if max_date is not None:
-            return User(back=back, last_poll=float(last_poll), max_date=float(max_date), username=username, username_unique=username_unique, data=json.loads(data), exited=json.loads(exited))
+            return CurrentUser(session_id=session_id, back=back, last_poll=float(last_poll), 
+                        max_date=float(max_date), username=username, 
+                        username_unique=username_unique, 
+                        data=json.loads(data), exited=json.loads(exited))
 
         if retrieve_past:
             return self.get_past_user(session_id)
@@ -760,7 +885,9 @@ class _RedisManager(object):
         back, max_date, username, username_unique, data = pipeline.execute()
 
         if max_date is not None:
-            return PastUser(back=back, max_date=float(max_date), username=username, username_unique=username_unique, data=json.loads(data))
+            return PastUser(session_id=session_id, back=back, max_date=float(max_date), 
+                            username=username, username_unique=username_unique, 
+                            data=json.loads(data))
 
     def delete_user(self, session_id, past_user):
         if self.client.hget('weblab:active:{}'.format(session_id), "max_date") is None:
