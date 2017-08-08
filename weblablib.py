@@ -825,7 +825,7 @@ class _RedisManager(object):
         if max_date is None: # Object had been removed
             self.client.delete(key)
 
-    def get_user(self, session_id, retrieve_past=True):
+    def get_user(self, session_id):
         pipeline = self.client.pipeline()
         key = 'weblab:active:{}'.format(session_id)
         for name in 'back', 'last_poll', 'max_date', 'username', 'username-unique', 'data', 'exited':
@@ -838,10 +838,7 @@ class _RedisManager(object):
                         username_unique=username_unique, 
                         data=json.loads(data), exited=json.loads(exited))
 
-        if retrieve_past:
-            return self.get_past_user(session_id)
-
-        return AnonymousUser()
+        return self.get_past_user(session_id)
 
     def get_past_user(self, session_id):
         pipeline = self.client.pipeline()
@@ -902,7 +899,7 @@ class _RedisManager(object):
 
         for active_key in self.client.keys('weblab:active:*'):
             session_id = active_key[len('weblab:active:'):]
-            user = self.get_user(session_id, retrieve_past=False)
+            user = self.get_user(session_id)
             if user.active: # Double check: he might be deleted in the meanwhile
                 if user.time_left() <= 0:
                     expired_sessions.append(session_id)
@@ -910,7 +907,11 @@ class _RedisManager(object):
         return expired_sessions
 
     def session_exists(self, session_id, retrieve_past=True):
-        return self.get_user(session_id, retrieve_past=retrieve_past) is not None
+        user = self.get_user(session_id)
+        if retrieve_past:
+            return not user.is_anonymous
+
+        return user.active
 
     def poll(self, session_id):
         key = 'weblab:active:{}'.format(session_id)
