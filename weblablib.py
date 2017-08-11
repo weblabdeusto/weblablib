@@ -653,7 +653,7 @@ class ExpiredUser(WebLabUser):
         return False
 
     def __unicode__(self):
-        return u'Expired user (id: {!r}): {!r} ({!r}), max date: {!r}. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self._max_date, self._back)
+        return u'Expired user (id: {!r}): {!r} ({!r}), max date in {:.2f} seconds. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self._max_date - _current_timestamp(), self._back)
 
 ##################################################################################################################
 #
