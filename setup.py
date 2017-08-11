@@ -25,4 +25,5 @@ setup(name='weblablib',
       url='http://github.com/weblabdeusto/weblablib/',
       license=cp_license,
       py_modules=['weblablib'],
+      install_requires=['redis', 'flask'],
      )

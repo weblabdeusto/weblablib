@@ -54,6 +54,14 @@ __all__ = ['WebLab',
             'requires_login', 'requires_active', 
             'CurrentUser', 'AnonymousUser', 'PastUser']
 
+# 
+# TODO: add something for jinja to do:
+# 
+# {{ weblab_poll_script() }}
+# 
+# which automatically will take into account the polling
+# etc.
+# 
 
 class ConfigurationKeys(object):
     """
@@ -331,7 +339,8 @@ class WebLab(object):
                     print("Session not found. Did you call fake_user first?")
                     return
                 session_id = open('.fake_weblab_user_session_id').read()
-                pass
+                status_time = _status_time(session_id)
+                print("Should finish: {}".format(status_time))
 
             @self._app.cli.command()
             def fake_dispose():
@@ -339,7 +348,12 @@ class WebLab(object):
                     print("Session not found. Did you call fake_user first?")
                     return
                 session_id = open('.fake_weblab_user_session_id').read()
-                pass
+                try:
+                    _dispose_user(session_id)
+                except _NotFoundError:
+                    print("Not found")
+                else:
+                    print("Deleted")
 
         if self._app.config.get('WEBLAB_AUTOCLEAN_THREAD', True):
             self._cleaner_thread = _CleanerThread(self._app)
@@ -812,26 +826,7 @@ def _status(session_id):
     This method provides the current status of a particular
     user.
     """
-
-    weblab = _current_weblab()
-    redis_manager = weblab.redis_manager
-    user = redis_manager.get_user(session_id)
-    if user.is_anonymous or not user.active:
-        return jsonify(should_finish=-1)
-
-    if user.exited:
-        return jsonify(should_finish=-1)
-
-    if weblab.timeout and weblab.timeout > 0:
-        # If timeout is set to -1, it will never timeout (unless user exited)
-        if user.time_without_polling() >= weblab.timeout:
-            return jsonify(should_finish=-1)
-
-    if user.time_left() <= 0:
-        return jsonify(should_finish=-1)
-
-    current_app.logger.debug("User {} still has {} seconds".format(user.username, user.time_left()))
-    return jsonify(should_finish=min(5, int(user.time_left())))
+    return jsonify(should_finish=_status_time(session_id))
 
 
 @_weblab_blueprint.route('/sessions/<session_id>', methods=['POST'])
@@ -1017,6 +1012,28 @@ def _to_timestamp(dt):
 
 def _current_timestamp():
     return float(_to_timestamp(datetime.datetime.now()))
+
+def _status_time(session_id):
+    weblab = _current_weblab()
+    redis_manager = weblab.redis_manager
+    user = redis_manager.get_user(session_id)
+    if user.is_anonymous or not user.active:
+        return -1
+
+    if user.exited:
+        return -1
+
+    if weblab.timeout and weblab.timeout > 0:
+        # If timeout is set to -1, it will never timeout (unless user exited)
+        if user.time_without_polling() >= weblab.timeout:
+            return -1
+
+    if user.time_left() <= 0:
+        return -1
+
+    current_app.logger.debug("User {} still has {} seconds".format(user.username, user.time_left()))
+    return min(5, int(user.time_left()))
+
 
 def _dispose_user(session_id):
     redis_manager = _current_redis()
