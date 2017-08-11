@@ -39,10 +39,12 @@ import base64
 import datetime
 import threading
 import traceback
+import webbrowser
 
 from functools import wraps
 
 import redis
+import click
 
 from werkzeug import LocalProxy
 from flask import Blueprint, Response, jsonify, request, current_app, redirect, \
@@ -311,23 +313,23 @@ class WebLab(object):
             return dict(weblab_poll_script=weblab_poll_script)
 
         if hasattr(app, 'cli'):
-            @self._app.cli.command()
+            @self._app.cli.command('clean-expired-users')
             def clean_expired_users():
                 self.clean_expired_users()
 
-            @self._app.cli.command()
-            @self._app.cli.option('--name', default='John Smith', help="First and last name")
-            @self._app.cli.option('--username', default='john.smith', help="Username passed")
-            @self._app.cli.option('--username-unique', default='john.smith@institution', help="Unique username passed")
-            @self._app.cli.option('--time', default=300, help="Time in seconds passed to the laboratory")
-            @self._app.cli.option('--back', default='http://weblab.deusto.es', help="URL to send the user back")
-            @self._app.cli.option('--open-browser', default=False, help="Open the fake use in a web browser")
+            @self._app.cli.command('fake-new-user')
+            @click.option('--name', default='John Smith', help="First and last name")
+            @click.option('--username', default='john.smith', help="Username passed")
+            @click.option('--username-unique', default='john.smith@institution', help="Unique username passed")
+            @click.option('--time', default=300, help="Time in seconds passed to the laboratory")
+            @click.option('--back', default='http://weblab.deusto.es', help="URL to send the user back")
+            @click.option('--open-browser', is_flag=True, help="Open the fake use in a web browser")
             def fake_user(name, username, username_unique, time, back, open_browser):
                 time = float(time)
                 
                 start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
 
-                request_data = json.dumps({
+                request_data = {
                     'client_initial_data': {},
                     'server_initial_data': {
                         'priority.queue.slot.start': start_time,
@@ -336,18 +338,26 @@ class WebLab(object):
                         'request.username.unique': username_unique,
                     },
                     'back': back,
-                })
+                }
+
                 result = _process_start_request(request_data)
+                print()
+                print("Congratulations! The session is started")
+                print()
                 print("Open: {}".format(result['url']))
+                if not open_browser:
+                    print(" (Next time, you can use --open-browser to automatically open the session in your web browser)")
+                print()
                 print("Session identifier: {}\n".format(result['session_id']))
                 open(".fake_weblab_user_session_id", 'w').write(result['session_id'])
-                print("Now you can make calls as if you were WebLab-Deusto:")
-                print(" - flask fake_status")
-                print(" - flask fake_dispose")
+                print("Now you can make calls as if you were WebLab-Deusto (no argument needed):")
+                print(" - flask fake-status")
+                print(" - flask fake-dispose")
+                print()
                 if open_browser:
                     webbrowser.open(result['url'])
 
-            @self._app.cli.command()
+            @self._app.cli.command('fake-status')
             def fake_status():
                 if not os.path.exists('.fake_weblab_user_session_id'):
                     print("Session not found. Did you call fake_user first?")
@@ -356,7 +366,7 @@ class WebLab(object):
                 status_time = _status_time(session_id)
                 print("Should finish: {}".format(status_time))
 
-            @self._app.cli.command()
+            @self._app.cli.command('fake-dispose')
             def fake_dispose():
                 if not os.path.exists('.fake_weblab_user_session_id'):
                     print("Session not found. Did you call fake_user first?")
@@ -368,6 +378,10 @@ class WebLab(object):
                     print("Not found")
                 else:
                     print("Deleted")
+            
+            if not self._app.config.get('SERVER_NAME'):
+                print("Overriding SERVER_NAME to localhost:5000")
+                self._app.config['SERVER_NAME'] = 'localhost:5000'
 
         if self._app.config.get('WEBLAB_AUTOCLEAN_THREAD', True):
             self._cleaner_thread = _CleanerThread(self._app)
@@ -977,7 +991,7 @@ class _RedisManager(object):
             session_id = active_key[len('weblab:active:'):]
             user = self.get_user(session_id)
             if user.active: # Double check: he might be deleted in the meanwhile
-                if user.time_left() <= 0:
+                if user.time_left <= 0:
                     expired_sessions.append(session_id)
 
         return expired_sessions
@@ -1029,7 +1043,7 @@ def _current_timestamp():
 
 def _status_time(session_id):
     weblab = _current_weblab()
-    redis_manager = weblab.redis_manager
+    redis_manager = weblab._redis_manager
     user = redis_manager.get_user(session_id)
     if user.is_anonymous or not user.active:
         return -1
@@ -1039,14 +1053,14 @@ def _status_time(session_id):
 
     if weblab.timeout and weblab.timeout > 0:
         # If timeout is set to -1, it will never timeout (unless user exited)
-        if user.time_without_polling() >= weblab.timeout:
+        if user.time_without_polling >= weblab.timeout:
             return -1
 
-    if user.time_left() <= 0:
+    if user.time_left <= 0:
         return -1
 
-    current_app.logger.debug("User {} still has {} seconds".format(user.username, user.time_left()))
-    return min(5, int(user.time_left()))
+    current_app.logger.debug("User {} still has {} seconds".format(user.username, user.time_left))
+    return min(5, int(user.time_left))
 
 
 def _dispose_user(session_id):
