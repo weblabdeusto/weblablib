@@ -54,15 +54,6 @@ __all__ = ['WebLab',
             'requires_login', 'requires_active', 
             'CurrentUser', 'AnonymousUser', 'PastUser']
 
-# 
-# TODO: add something for jinja to do:
-# 
-# {{ weblab_poll_script() }}
-# 
-# which automatically will take into account the polling
-# etc.
-# 
-
 class ConfigurationKeys(object):
     """
     ConfigurationKeys represents all the configuration keys available in weblablib. 
@@ -256,7 +247,7 @@ class WebLab(object):
             print("Note: your callback URL ({}) ends with '/'. It is discouraged".format(self._callback_url), file=sys.stderr)
 
         @self._app.route(self._callback_url + '/<session_id>')
-        def callback_url(session_id):
+        def weblab_callback_url(session_id):
             if self._initial_url is None:
                 print("ERROR: You MUST use @weblab.initial_url to point where the WebLab users should be redirected to.", file=sys.stderr)
                 return "ERROR: laboratory not properly configured, didn't call @weblab.initial_url", 500
@@ -266,6 +257,17 @@ class WebLab(object):
                 return redirect(self._initial_url())
 
             return self._forbidden_handler()
+
+        @self._app.route(self._callback_url + '/<session_id>/poll')
+        def weblab_poll_url(session_id):
+            if session.get(self._session_id_name) != session_id:
+                return jsonify(success=False, reason="Different session identifier")
+                
+            if not self._redis_manager.session_exists(session_id):
+                return jsonify(success=False, reason="Not found")
+
+            poll()
+            return jsonify(success=True)
 
         #
         # Add autopoll
@@ -295,6 +297,18 @@ class WebLab(object):
         for key in 'WEBLAB_USERNAME', 'WEBLAB_PASSWORD':
             if key not in self._app.config:
                 raise ValueError("Invalid configuration. Missing {}".format(key))
+
+        def weblab_poll_script():
+            weblab_timeout = int(1000 * self.timeout // 2)
+            return """<script>
+            var WEBLAB_TIMEOUT = setInterval(function () {
+                $.get("{url}")
+            }, {timeout} )
+            </script>""".format(timeout=weblab_timeout)
+
+        @self._app.context_processor
+        def weblab_context_processor():
+            return dict(weblab_poll_script=weblab_poll_script)
 
         if hasattr(app, 'cli'):
             @self._app.cli.command()
@@ -815,7 +829,7 @@ def _process_start_request(request_data):
         else:
             redis_manager.update_data(session_id, data)
 
-    link = url_for('callback_url', session_id=session_id, _external=True, **kwargs)
+    link = url_for('weblab_callback_url', session_id=session_id, _external=True, **kwargs)
     return dict(url=link, session_id=session_id)
 
 
