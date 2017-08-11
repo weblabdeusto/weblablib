@@ -51,6 +51,7 @@ def index():
 if __name__ == '__main__':
     print("Run the following:")
     print()
+    print(" (optionally) $ export FLASK_DEBUG=1")
     print(" $ export FLASK_APP={}".format(__file__))
     print(" $ flask run")
     print()

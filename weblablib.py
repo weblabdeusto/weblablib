@@ -54,7 +54,7 @@ __all__ = ['WebLab',
             'logout', 'poll', 
             'weblab_user', 
             'requires_login', 'requires_active', 
-            'CurrentUser', 'AnonymousUser', 'PastUser']
+            'CurrentUser', 'AnonymousUser', 'ExpiredUser']
 
 class ConfigurationKeys(object):
     """
@@ -360,18 +360,20 @@ class WebLab(object):
             @self._app.cli.command('fake-status')
             def fake_status():
                 if not os.path.exists('.fake_weblab_user_session_id'):
-                    print("Session not found. Did you call fake_user first?")
+                    print("Session not found. Did you call fake-new-user first?")
                     return
                 session_id = open('.fake_weblab_user_session_id').read()
                 status_time = _status_time(session_id)
+                print(self._redis_manager.get_user(session_id))
                 print("Should finish: {}".format(status_time))
 
             @self._app.cli.command('fake-dispose')
             def fake_dispose():
                 if not os.path.exists('.fake_weblab_user_session_id'):
-                    print("Session not found. Did you call fake_user first?")
+                    print("Session not found. Did you call fake-new-user first?")
                     return
                 session_id = open('.fake_weblab_user_session_id').read()
+                print(self._redis_manager.get_user(session_id))
                 try:
                     _dispose_user(session_id)
                 except _NotFoundError:
@@ -380,8 +382,17 @@ class WebLab(object):
                     print("Deleted")
             
             if not self._app.config.get('SERVER_NAME'):
-                print("Overriding SERVER_NAME to localhost:5000")
-                self._app.config['SERVER_NAME'] = 'localhost:5000'
+                if 'fake-new-user' in sys.argv:
+                    server_name = os.environ.get('SERVER_NAME')
+                    default_server_name = 'localhost:5000'
+                    if not server_name:
+                        print(file=sys.stderr)
+                        print("Note: No SERVER_NAME provided; using {!r} If you want other, run:".format(default_server_name), file=sys.stderr)
+                        print("      $ export SERVER_NAME=localhost:5001", file=sys.stderr)
+                        print(file=sys.stderr)
+                        server_name = default_server_name
+
+                    self._app.config['SERVER_NAME'] = server_name
 
         if self._app.config.get('WEBLAB_AUTOCLEAN_THREAD', True):
             self._cleaner_thread = _CleanerThread(self._app)
@@ -484,6 +495,13 @@ class WebLabUser(object):
     def is_anonymous(self):
         """Was the user a valid user recently?"""
 
+    @abc.abstractmethod
+    def __unicode__(self):
+        """Unicode representation"""
+
+    def __str__(self):
+        return self.__unicode__().encode('utf8')
+
 class AnonymousUser(WebLabUser):
     @property
     def active(self):
@@ -493,9 +511,12 @@ class AnonymousUser(WebLabUser):
     def is_anonymous(self):
         return True
 
+    def __unicode__(self):
+        return "Anonymous user"
+
 class CurrentUser(WebLabUser):
     """
-    This class represents a user which is still actively using a laboratory. If the session expires, it will become a PastUser.
+    This class represents a user which is still actively using a laboratory. If the session expires, it will become a ExpiredUser.
 
     back: URL to redirect the user when finished
     last_poll: the last time the user polled. Updated every time poll() is called.
@@ -568,11 +589,11 @@ class CurrentUser(WebLabUser):
         """
         return max(0, self.max_date - _current_timestamp())
 
-    def to_past_user(self):
+    def to_expired_user(self):
         """
-        Create a PastUser based on the data of the user
+        Create a ExpiredUser based on the data of the user
         """
-        return PastUser(session_id=self._session_id, back=self._back, max_date=self._max_date, username=self._username, username_unique=self._username_unique, data=self._data)
+        return ExpiredUser(session_id=self._session_id, back=self._back, max_date=self._max_date, username=self._username, username_unique=self._username_unique, data=self._data)
 
     @property
     def active(self):
@@ -582,9 +603,12 @@ class CurrentUser(WebLabUser):
     def is_anonymous(self):
         return False
 
-class PastUser(WebLabUser):
+    def __unicode__(self):
+        return u'Current user (id: {!r}): {!r} ({!r}), last poll: {:.2f} seconds ago. Max date in {:.2f} seconds. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self.time_without_polling, self._max_date - _current_timestamp(), self._back)
+
+class ExpiredUser(WebLabUser):
     """
-    This class represents a user which has been kicked out already. Typically this PastUser is kept in redis for around an hour.
+    This class represents a user which has been kicked out already. Typically this ExpiredUser is kept in redis for around an hour.
 
     All the fields are same as in User.
     """
@@ -628,6 +652,9 @@ class PastUser(WebLabUser):
     def is_anonymous(self):
         return False
 
+    def __unicode__(self):
+        return u'Expired user (id: {!r}): {!r} ({!r}), max date: {!r}. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self._max_date, self._back)
+
 ##################################################################################################################
 #
 #
@@ -662,9 +689,9 @@ def poll():
 
 def _weblab_user():
     """
-    Get the current user. Optionally, return the PastUser if the current one expired.
+    Get the current user. Optionally, return the ExpiredUser if the current one expired.
 
-    @active_only: if set to True, do not return a past user (and None instead)
+    @active_only: if set to True, do not return a expired user (and None instead)
     """
 
     if hasattr(g, 'weblab_user'):
@@ -689,8 +716,8 @@ def requires_login(redirect_back=True, current_only=False):
     """
     Decorator. Requires the user to be logged in (and be a current user or not).
 
-    @redirect_back: if it's a past user, automatically redirect him to the original link
-    @current_only: if it's a past_user and redirect_back is False, then act as if he was
+    @redirect_back: if it's a expired user, automatically redirect him to the original link
+    @current_only: if it's a expired_user and redirect_back is False, then act as if he was
       an invalid user
     """
     def requires_login_decorator(func):
@@ -701,7 +728,7 @@ def requires_login(redirect_back=True, current_only=False):
                     # If anonymous user: forbidden
                     return _current_weblab()._forbidden_handler()
                 elif redirect_back:
-                    # If past user found, and redirect_back is the policy, return the user
+                    # If expired user found, and redirect_back is the policy, return the user
                     return redirect(weblab_user.back)
                 elif current_only:
                     # If it requires a current user
@@ -928,9 +955,9 @@ class _RedisManager(object):
                         username_unique=username_unique, 
                         data=json.loads(data), exited=json.loads(exited))
 
-        return self.get_past_user(session_id)
+        return self.get_expired_user(session_id)
 
-    def get_past_user(self, session_id):
+    def get_expired_user(self, session_id):
         pipeline = self.client.pipeline()
         key = 'weblab:inactive:{}'.format(session_id)
         for name in 'back', 'max_date', 'username', 'username-unique', 'data':
@@ -939,13 +966,13 @@ class _RedisManager(object):
         back, max_date, username, username_unique, data = pipeline.execute()
 
         if max_date is not None:
-            return PastUser(session_id=session_id, back=back, max_date=float(max_date), 
+            return ExpiredUser(session_id=session_id, back=back, max_date=float(max_date), 
                             username=username, username_unique=username_unique, 
                             data=json.loads(data))
 
         return AnonymousUser()
 
-    def delete_user(self, session_id, past_user):
+    def delete_user(self, session_id, expired_user):
         if self.client.hget('weblab:active:{}'.format(session_id), "max_date") is None:
             return False
 
@@ -958,11 +985,11 @@ class _RedisManager(object):
 
         key = 'weblab:inactive:{}'.format(session_id)
 
-        pipeline.hset(key, "back", past_user.back)
-        pipeline.hset(key, "max_date", past_user.max_date)
-        pipeline.hset(key, "username", past_user.username)
-        pipeline.hset(key, "username-unique", past_user.username_unique)
-        pipeline.hset(key, "data", json.dumps(past_user.data))
+        pipeline.hset(key, "back", expired_user.back)
+        pipeline.hset(key, "max_date", expired_user.max_date)
+        pipeline.hset(key, "username", expired_user.username)
+        pipeline.hset(key, "username-unique", expired_user.username_unique)
+        pipeline.hset(key, "data", json.dumps(expired_user.data))
 
         # During half an hour after being created, the user is redirected to
         # the original URL. After that, every record of the user has been deleted
@@ -996,9 +1023,9 @@ class _RedisManager(object):
 
         return expired_sessions
 
-    def session_exists(self, session_id, retrieve_past=True):
+    def session_exists(self, session_id, retrieve_expired=True):
         user = self.get_user(session_id)
-        if retrieve_past:
+        if retrieve_expired:
             return not user.is_anonymous
 
         return user.active
@@ -1072,8 +1099,8 @@ def _dispose_user(session_id):
     if not user.active:
         return
 
-    current_past_user = user.to_past_user()
-    deleted = redis_manager.delete_user(session_id, current_past_user)
+    current_expired_user = user.to_expired_user()
+    deleted = redis_manager.delete_user(session_id, current_expired_user)
 
     if deleted:
         weblab = _current_weblab()
