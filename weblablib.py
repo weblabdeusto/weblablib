@@ -184,6 +184,14 @@ class WebLab(object):
 
         self._initialized = False
 
+        self._task_functions = {
+            # func_name: _TaskWrapper
+        }
+
+        self._tasks = {
+            # task_id: _Task
+        }
+
         if app is not None:
             self.init_app(app)
 
@@ -473,6 +481,39 @@ class WebLab(object):
                 pass
             except Exception:
                 traceback.print_exc()
+
+    def task(self, func):
+        """
+        A task is a function that can be called later on by the WebLab wrapper. It is a set
+        of threads running in the background, so you don't need to deal with it later on.
+
+        @weblab.task
+        def function(a, b):
+            return a + b
+
+        You can either call it directly (no thread involved):
+
+        result = function(5, 3)
+
+        Or you can call it delayed (and it will be run in a different thread):
+
+        task_result = function.delay(5, 3)
+        task_result.task_id # The task identifier
+        task_result.status # Either submitted, running, done or failed
+        task_result.result # If done
+        task_result.error # If failed
+        
+        Later on, you can get tasks by running:
+
+        task_result = weblab.get_task(task_id)
+        
+        """
+        wrapper = _TaskWrapper(self, func)
+        if func.__name__ in self._task_functions:
+            raise ValueError("You can't have two tasks with the same name ({})".format(func.__name__))
+
+        self._task_functions[func.__name__] = wrapper
+        return wrapper
 
 ##################################################################################################################
 #
@@ -1053,6 +1094,31 @@ class _RedisManager(object):
             # If the user was deleted in between, revert the last_poll
             self.client.delete(key)
 
+###################################################################################### 
+# 
+# 
+#     Task management
+# 
+
+class _TaskWrapper(object):
+    def __init__(self, weblab, func):
+        self.func = func
+        self.weblab = weblab
+
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+
+    def delay(self, *args, **kwargs):
+        pass # TODO
+
+    def delay_name(self, name, *args, **kwargs):
+        pass # TODO
+
+# TODO: implement these two classes
+
+class _Task(object):
+    def __init__(self):
+        pass
 
 ######################################################################################
 #
