@@ -10,6 +10,7 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'something random' # e.g., os.urandom(32)
 app.config['SESSION_COOKIE_NAME'] = 'advanced_lab'
 app.config['SESSION_COOKIE_PATH'] = '/lab'
+app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
 
 app.config['WEBLAB_USERNAME'] = 'weblabdeusto'
 app.config['WEBLAB_PASSWORD'] = 'password'
@@ -28,14 +29,16 @@ def initial_url():
     return url_for('.lab')
 
 @weblab.on_start
-def on_start(client_data, server_data, user):
+def on_start(client_data, server_data):
     print("New user!")
     print(client_data)
     print(server_data)
+    print(weblab_user)
 
 @weblab.on_dispose
-def on_stop(user):
+def on_stop():
     print("User expired. Here you should clean resources")
+    print(weblab_user)
 
 @app.route('/lab/')
 @requires_active()

@@ -211,7 +211,7 @@ class WebLab(object):
         # Initialize Redis Manager
         #
         redis_url = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_URL, 'redis://localhost:6379/0')
-        self._redis_manager = _RedisManager(redis_url)
+        self._redis_manager = _RedisManager(redis_url, self)
 
         #
         # Initialize session settings
@@ -430,8 +430,9 @@ class WebLab(object):
     def on_start(self, func):
         """
         Register a method for being called when a new user comes. The format is:
-
-        def start(client_data, server_data, user):
+        
+        @weblab.on_start
+        def start(client_data, server_data):
             return data # simple data, e.g., None, a dict, a list... that will be available as weblab_user.data
 
         """
@@ -444,8 +445,9 @@ class WebLab(object):
     def on_dispose(self, func):
         """
         Register a method for being called when a new user comes.
-
-        def stop(user):
+        
+        @weblab.on_dispose
+        def dispose():
             pass
         """
         if self._on_dispose is not None:
@@ -643,6 +645,10 @@ class ExpiredUser(WebLabUser):
     @property
     def data(self):
         return self._data
+
+    @data.setter
+    def data(self, value):
+        raise NotImplementedError("You can't change data on an ExpiredUser")
 
     @property
     def active(self):
@@ -864,7 +870,7 @@ def _process_start_request(request_data):
     if weblab._on_start:
         _set_weblab_user_cache(user)
         try:
-            data = weblab._on_start(client_initial_data, server_initial_data, user)
+            data = weblab._on_start(client_initial_data, server_initial_data)
         except Exception:
             traceback.print_exc()
         else:
@@ -914,8 +920,9 @@ def _dispose_experiment(session_id):
 
 class _RedisManager(object):
 
-    def __init__(self, redis_url):
+    def __init__(self, redis_url, weblab):
         self.client = redis.StrictRedis.from_url(redis_url)
+        self.weblab = weblab
 
     def add_user(self, session_id, user, expiration):
         key = 'weblab:active:{}'.format(session_id)
@@ -1021,6 +1028,9 @@ class _RedisManager(object):
                 if user.time_left <= 0:
                     expired_sessions.append(session_id)
 
+                elif user.time_without_polling >= self.weblab.timeout:
+                    expired_sessions.append(session_id)
+                    
         return expired_sessions
 
     def session_exists(self, session_id, retrieve_expired=True):
@@ -1107,7 +1117,7 @@ def _dispose_user(session_id):
         if weblab._on_dispose:
             _set_weblab_user_cache(user)
             try:
-                weblab._on_dispose(user)
+                weblab._on_dispose()
             except Exception:
                 traceback.print_exc()
 
