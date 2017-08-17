@@ -98,6 +98,15 @@ class ConfigurationKeys(object):
     # Redis URL for storing information
     WEBLAB_REDIS_URL = 'WEBLAB_REDIS_URL'
 
+    # Redis base. If you have more than one lab in the same Redis server, 
+    # you can use this variable to make it work without conflicts. By default
+    # it's lab, so all the keys will be "lab:weblab:active:session-id", for example
+    WEBLAB_REDIS_BASE = 'WEBLAB_REDIS_BASE'
+
+    # How long the results of the tasks should be stored in Redis? In seconds. 
+    # By default one hour.
+    WEBLAB_TASK_EXPIRES = 'WEBLAB_TASK_EXPIRES'
+
     # Number of seconds. If the user does not poll in that time, we consider
     # that he will be kicked out. Defaults to 15 seconds. It can be set
     # to -1 to disable the timeout (and therefore polling makes no sense)
@@ -219,7 +228,9 @@ class WebLab(object):
         # Initialize Redis Manager
         #
         redis_url = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_URL, 'redis://localhost:6379/0')
-        self._redis_manager = _RedisManager(redis_url, self)
+        redis_base = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_BASE, 'lab')
+        task_expires = self._app.config.get(ConfigurationKeys.WEBLAB_TASK_EXPIRES, 3600)
+        self._redis_manager = _RedisManager(redis_url, redis_base, task_expires, self)
 
         #
         # Initialize session settings
@@ -482,12 +493,12 @@ class WebLab(object):
             except Exception:
                 traceback.print_exc()
 
-    def task(self, func):
+    def task(self):
         """
         A task is a function that can be called later on by the WebLab wrapper. It is a set
         of threads running in the background, so you don't need to deal with it later on.
 
-        @weblab.task
+        @weblab.task()
         def function(a, b):
             return a + b
 
@@ -508,12 +519,19 @@ class WebLab(object):
         task_result = weblab.get_task(task_id)
         
         """
-        wrapper = _TaskWrapper(self, func)
-        if func.__name__ in self._task_functions:
-            raise ValueError("You can't have two tasks with the same name ({})".format(func.__name__))
+        # 
+        # In the future, weblab.task() will have other parameters, such as
+        # discard_result (so the redis record is immediately discarded)
+        # 
+        def task_wrapper(func):
+            wrapper = _TaskWrapper(self, func)
+            if func.__name__ in self._task_functions:
+                raise ValueError("You can't have two tasks with the same name ({})".format(func.__name__))
 
-        self._task_functions[func.__name__] = wrapper
-        return wrapper
+            self._task_functions[func.__name__] = wrapper
+            return wrapper
+
+        return task_wrapper
 
 ##################################################################################################################
 #
@@ -889,8 +907,7 @@ def _process_start_request(request_data):
     max_date = start_date + datetime.timedelta(seconds=float(server_initial_data['priority.queue.slot.length']))
 
     # Create a global session
-    tok = os.urandom(32)
-    session_id = base64.urlsafe_b64encode(tok).strip().replace('=', '').replace('-', '_').decode('utf8')
+    session_id = _create_token()
 
     # Prepare adding this to redis
     user = CurrentUser(session_id=session_id, back=request_data['back'], last_poll=_current_timestamp(), max_date=float(_to_timestamp(max_date)),
@@ -961,12 +978,14 @@ def _dispose_experiment(session_id):
 
 class _RedisManager(object):
 
-    def __init__(self, redis_url, weblab):
+    def __init__(self, redis_url, key_base, task_expires, weblab):
         self.client = redis.StrictRedis.from_url(redis_url)
         self.weblab = weblab
+        self.key_base = key_base
+        self.task_expires = task_expires
 
     def add_user(self, session_id, user, expiration):
-        key = 'weblab:active:{}'.format(session_id)
+        key = '{}:weblab:active:{}'.format(self.key_base, session_id)
 
         pipeline = self.client.pipeline()
         pipeline.hset(key, 'max_date', user.max_date)
@@ -980,7 +999,7 @@ class _RedisManager(object):
         pipeline.execute()
 
     def update_data(self, session_id, data):
-        key = 'weblab:active:{}'.format(session_id)
+        key = '{}:weblab:active:{}'.format(self.key_base, session_id)
 
         pipeline = self.client.pipeline()
         pipeline.hget(key, 'max_date')
@@ -992,7 +1011,7 @@ class _RedisManager(object):
 
     def get_user(self, session_id):
         pipeline = self.client.pipeline()
-        key = 'weblab:active:{}'.format(session_id)
+        key = '{}:weblab:active:{}'.format(self.key_base, session_id)
         for name in 'back', 'last_poll', 'max_date', 'username', 'username-unique', 'data', 'exited':
             pipeline.hget(key, name)
         back, last_poll, max_date, username, username_unique, data, exited = pipeline.execute()
@@ -1007,7 +1026,7 @@ class _RedisManager(object):
 
     def get_expired_user(self, session_id):
         pipeline = self.client.pipeline()
-        key = 'weblab:inactive:{}'.format(session_id)
+        key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
         for name in 'back', 'max_date', 'username', 'username-unique', 'data':
             pipeline.hget(key, name)
 
@@ -1021,7 +1040,7 @@ class _RedisManager(object):
         return AnonymousUser()
 
     def delete_user(self, session_id, expired_user):
-        if self.client.hget('weblab:active:{}'.format(session_id), "max_date") is None:
+        if self.client.hget('{}:weblab:active:{}'.format(self.key_base, session_id), "max_date") is None:
             return False
 
         #
@@ -1029,9 +1048,9 @@ class _RedisManager(object):
         # it's not a big deal (as long as only one calls _on_delete later).
         #
         pipeline = self.client.pipeline()
-        pipeline.delete("weblab:active:{}".format(session_id))
+        pipeline.delete("{}:weblab:active:{}".format(self.key_base, session_id))
 
-        key = 'weblab:inactive:{}'.format(session_id)
+        key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
 
         pipeline.hset(key, "back", expired_user.back)
         pipeline.hset(key, "max_date", expired_user.max_date)
@@ -1041,7 +1060,7 @@ class _RedisManager(object):
 
         # During half an hour after being created, the user is redirected to
         # the original URL. After that, every record of the user has been deleted
-        pipeline.expire("weblab:inactive:{}".format(session_id), current_app.config.get(ConfigurationKeys.WEBLAB_PAST_USERS_TIMEOUT, 3600))
+        pipeline.expire("{}:weblab:inactive:{}".format(self.key_base, session_id), current_app.config.get(ConfigurationKeys.WEBLAB_PAST_USERS_TIMEOUT, 3600))
         results = pipeline.execute()
 
         return results[0] != 0 # If redis returns 0 on delete() it means that it was not deleted
@@ -1052,18 +1071,18 @@ class _RedisManager(object):
         WebLab-Deusto.
         """
         pipeline = self.client.pipeline()
-        pipeline.hget("weblab:active:{}".format(session_id), "max_date")
-        pipeline.hset("weblab:active:{}".format(session_id), "exited", "true")
+        pipeline.hget("{}:weblab:active:{}".format(self.key_base, session_id), "max_date")
+        pipeline.hset("{}:weblab:active:{}".format(self.key_base, session_id), "exited", "true")
         max_date, _ = pipeline.execute()
         if max_date is None:
             # If max_date is None it means that it had been previously deleted
-            self.client.delete("weblab:active:{}".format(session_id))
+            self.client.delete("{}:weblab:active:{}".format(self.key_base, session_id))
 
     def find_expired_sessions(self):
         expired_sessions = []
 
-        for active_key in self.client.keys('weblab:active:*'):
-            session_id = active_key[len('weblab:active:'):]
+        for active_key in self.client.keys('{}:weblab:active:*'.format(self.key_base)):
+            session_id = active_key[len('{}:weblab:active:'.format(self.key_base)):]
             user = self.get_user(session_id)
             if user.active: # Double check: he might be deleted in the meanwhile
                 if user.time_left <= 0:
@@ -1082,7 +1101,7 @@ class _RedisManager(object):
         return user.active
 
     def poll(self, session_id):
-        key = 'weblab:active:{}'.format(session_id)
+        key = '{}:weblab:active:{}'.format(self.key_base, session_id)
 
         last_poll = _current_timestamp()
         pipeline = self.client.pipeline()
@@ -1094,6 +1113,101 @@ class _RedisManager(object):
             # If the user was deleted in between, revert the last_poll
             self.client.delete(key)
 
+    # 
+    # Task-related Redis methods
+    # 
+    def new_task(self, session_id, name, args, kwargs):
+        """
+        Get a new function, args and kwargs, and return the task_id.
+        """
+        task_id = _create_token()
+        while True:
+            pipeline = self.client.pipeline()
+            pipeline.set('{}:weblab:task_ids:{}'.format(self.key_base, task_id), task_id)
+            pipeline.expire('{}:weblab:task_ids:{}'.format(self.key_base, task_id), self.task_expires)
+            results = pipeline.execute()
+
+            if results[0]:
+                # Ensure it's unique
+                break
+            
+            # Otherwise try with another
+            task_id = _create_token()
+
+        pipeline = self.client.pipeline()
+        pipeline.sadd('{}:weblab:{}:tasks'.format(self.key_base, session_id), task_id)
+        pipeline.expire('{}:weblab:{}:tasks'.format(self.key_base, session_id), self.task_expires)
+        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'name', name)
+        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'session_id', session_id)
+        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'args', json.dumps(args))
+        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'kwargs', json.dumps(kwargs))
+        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'finished', 'false')
+        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'error', 'null')
+        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'result', 'null')
+        # Missing (normal): running. When created, we know if it's a new key and therefore that
+        # no other thread is processing it.
+        pipeline.execute()
+
+    def get_tasks_not_started(self):
+        task_ids = [ key[len('{}:weblab:task_ids:'.format(self.key_base))] 
+                for key in self.client.keys('{}:weblab:task_ids:*'.format(self.key_base)) ]
+
+        pipeline = self.client.pipeline()
+        for task_id in task_ids:
+            pipeline.hget('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'running')
+
+        results = pipeline.execute()
+        
+        not_started = []
+
+        for task_id, running in zip(task_ids, results):
+            if not running:
+                not_started.append(task_id)
+
+        return not_started
+
+    def start_task(self, task_id):
+        """
+        Mark a task as running. 
+        
+        If it exists, return a dictionary with name, args, kwargs and session_id
+
+        If it doesn't exist or is taken by other thread, return None
+        """
+        key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
+
+        pipeline = self.client.pipeline()
+        pipeline.hset(key, 'running', '1')
+        pipeline.hget(key, 'name')
+        pipeline.hget(key, 'args')
+        pipeline.hget(key, 'kwargs')
+        pipeline.hget(key, 'session_id')
+        
+        running, name, args, kwargs, session_id = pipeline.execute()
+        if not running:
+            # other thread did the hset first
+            return None
+
+        # If runnning == 1...
+        if name is None:
+            # The object was deleted before
+            self.client.delete(key)
+            return None
+
+        return {
+            'name': name,
+            'args': args,
+            'kwargs': kwargs,
+            'session_id': session_id,
+        }
+
+    def finish_task(self, task_id, result, error):
+        pass # TODO
+
+    def get_task(self, task_id):
+        pass # TODO: return the task, finished, etc.
+
+
 ###################################################################################### 
 # 
 # 
@@ -1103,6 +1217,7 @@ class _RedisManager(object):
 class _TaskWrapper(object):
     def __init__(self, weblab, func):
         self.func = func
+        self.name = func.__name__
         self.weblab = weblab
 
     def __call__(self, *args, **kwargs):
@@ -1116,9 +1231,53 @@ class _TaskWrapper(object):
 
 # TODO: implement these two classes
 
-class _Task(object):
-    def __init__(self):
-        pass
+class WebLabTask(object):
+    def __init__(self, weblab, task_id):
+        self.weblab = weblab
+        self._task_id = task_id
+
+    @property
+    def task_id(self):
+        return self._task_id
+
+    @property
+    def status(self):
+        pass # TODO
+
+    @property
+    def result(self):
+        """
+        In case of finishing (task.status == 'done'), this returns the result.
+        Otherwise, it returns None.
+        """
+        pass # TODO
+
+    @property
+    def error(self):
+        """
+        In case of error (task.status == 'failed'), this returns the Exception
+        that caused the error. Otherwise, it returns None.
+        """
+        pass # TODO
+
+class _TaskRunner(threading.Thread):
+    def __init__(self, number, weblab, app):
+        super(_TaskRunner, self).__init__()
+        self.name = 'weblab-task-runner-{}'.format(number)
+        self.daemon = True
+        self.app = app
+        self.weblab = weblab
+        self._stopping = False
+
+    def stop(self):
+        self._stopping = True
+
+    def run(self):
+        while not self._stopping:
+            time.sleep(1)
+            with self.app.app_context():
+                pass # TODO: make a method to process tasks
+
 
 ######################################################################################
 #
@@ -1143,6 +1302,10 @@ def _to_timestamp(dt):
 
 def _current_timestamp():
     return float(_to_timestamp(datetime.datetime.now()))
+
+def _create_token():
+    tok = os.urandom(32)
+    return base64.urlsafe_b64encode(tok).strip().replace('=', '').replace('-', '_').decode('utf8')
 
 def _status_time(session_id):
     weblab = _current_weblab()
