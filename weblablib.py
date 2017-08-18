@@ -1385,7 +1385,8 @@ class _RedisManager(object):
         pipeline = self.client.pipeline()
         pipeline.delete('{}:weblab:{}:tasks'.format(self.key_base, session_id))
         for task_id in task_ids:
-            pipeline.delete('{}:weblab:tasks:{}'.format(self.key_base, session_id), 'finished')
+            pipeline.delete('{}:weblab:tasks:{}'.format(self.key_base, task_id))
+            pipeline.delete('{}:weblab:task_ids:{}'.format(self.key_base, task_id))
         pipeline.execute()
 
 ######################################################################################
