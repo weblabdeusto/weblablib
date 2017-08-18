@@ -1,4 +1,6 @@
 .fake_weblab_user_session_id
+*.swp
+*.swo
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
