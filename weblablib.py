@@ -164,7 +164,7 @@ class WebLab(object):
     WebLab is a Flask extension that manages the settings (redis, session, etc.), and
     the registration of certain methods (e.g., on_start, etc.)
     """
-    def __init__(self, app=None, base_url=None, callback_url=None):
+    def __init__(self, app=None, callback_url=None, base_url=None):
         """
         Initializes the object. All the parameters are optional.
 
@@ -200,10 +200,6 @@ class WebLab(object):
 
         self._task_functions = {
             # func_name: _TaskWrapper
-        }
-
-        self._tasks = {
-            # task_id: _Task
         }
 
         self._task_threads = []
@@ -344,20 +340,38 @@ class WebLab(object):
         if hasattr(app, 'cli'):
             @self._app.cli.command('clean-expired-users')
             def clean_expired_users():
+                """
+                Clean expired users.
+
+                By default, a set of threads will be doing this, but you can also run it manually and
+                disable the threads.
+                """
                 self.clean_expired_users()
 
             @self._app.cli.command('run-tasks')
             def run_tasks():
+                """
+                Run planned tasks.
+
+                By default, a set of threads will be doing this, but you can run the tasks manually in
+                external processes.
+                """
                 self.run_tasks()
 
             @self._app.cli.command('fake-new-user')
             @click.option('--name', default='John Smith', help="First and last name")
             @click.option('--username', default='john.smith', help="Username passed")
             @click.option('--username-unique', default='john.smith@institution', help="Unique username passed")
-            @click.option('--time', default=300, help="Time in seconds passed to the laboratory")
+            @click.option('--assigned-time', default=300, help="Time in seconds passed to the laboratory")
             @click.option('--back', default='http://weblab.deusto.es', help="URL to send the user back")
             @click.option('--open-browser', is_flag=True, help="Open the fake use in a web browser")
             def fake_user(name, username, username_unique, assigned_time, back, open_browser):
+                """
+                Create a fake WebLab-Deusto user session.
+
+                This command creates a new user session and stores the session in disk, so you
+                can use other commands to check its status or delete it.
+                """
                 assigned_time = float(assigned_time)
 
                 start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
@@ -393,6 +407,12 @@ class WebLab(object):
 
             @self._app.cli.command('fake-status')
             def fake_status():
+                """
+                Check status of a fake user.
+
+                Once you create a user with fake-new-user, you can use this command to
+                simulate the status method of WebLab-Deusto and see what it would return.
+                """
                 if not os.path.exists('.fake_weblab_user_session_id'):
                     print("Session not found. Did you call fake-new-user first?")
                     return
@@ -403,17 +423,26 @@ class WebLab(object):
 
             @self._app.cli.command('fake-dispose')
             def fake_dispose():
+                """
+                End a session of a fake user.
+
+                Once you create a user with fake-new-user, you can use this command to
+                simulate the dispose method of WebLab-Deusto to kill the current session.
+                """
                 if not os.path.exists('.fake_weblab_user_session_id'):
                     print("Session not found. Did you call fake-new-user first?")
                     return
                 session_id = open('.fake_weblab_user_session_id').read()
                 print(self._redis_manager.get_user(session_id))
                 try:
-                    _dispose_user(session_id)
+                    _dispose_user(session_id, waiting=True)
                 except _NotFoundError:
                     print("Not found")
                 else:
                     print("Deleted")
+
+                if os.path.exists('.fake_weblab_user_session_id'):
+                    os.remove('.fake_weblab_user_session_id')
 
             if not self._app.config.get('SERVER_NAME'):
                 if 'fake-new-user' in sys.argv:
@@ -515,7 +544,7 @@ class WebLab(object):
         """
         for session_id in self._redis_manager.find_expired_sessions():
             try:
-                _dispose_user(session_id)
+                _dispose_user(session_id, waiting=False)
             except _NotFoundError:
                 pass
             except Exception:
@@ -523,6 +552,10 @@ class WebLab(object):
 
 
     def run_tasks(self):
+        if not self._task_functions:
+            # If no task was registered, simply ignore
+            return
+
         task_ids = self._redis_manager.get_tasks_not_started()
 
         for task_id in task_ids:
@@ -546,9 +579,12 @@ class WebLab(object):
                 continue
 
             self._set_session_id(session_id)
+            user = self._redis_manager.get_user(session_id)
+            _set_weblab_user_cache(user)
             try:
                 result = func(*args, **kwargs)
             except Exception as error:
+                traceback.print_exc()
                 self._redis_manager.finish_task(task_id, error={
                     'code': 'exception',
                     'class': type(error).__name__,
@@ -775,6 +811,10 @@ class ExpiredUser(WebLabUser):
         raise NotImplementedError("You can't change data on an ExpiredUser")
 
     @property
+    def time_left(self):
+        return 0
+
+    @property
     def active(self):
         return False
 
@@ -996,6 +1036,7 @@ def _process_start_request(request_data):
     weblab = _current_weblab()
     if weblab._on_start:
         _set_weblab_user_cache(user)
+        weblab._set_session_id(session_id)
         try:
             data = weblab._on_start(client_initial_data, server_initial_data)
         except Exception:
@@ -1032,18 +1073,9 @@ def _dispose_experiment(session_id):
         return jsonify(message="Unknown op")
 
     try:
-        _dispose_user(session_id)
+        _dispose_user(session_id, waiting=True)
     except _NotFoundError:
         return jsonify(message="Not found")
-
-    # if another thread has started the _dispose process, it might take long
-    # to process it. But this (sessions) is the one that tells WebLab-Deusto
-    # that someone else can enter in this laboratory. So we should wait
-    # here until the process is over.
-
-    while not _current_redis().is_session_deleted(session_id):
-        # In the future, instead of waiting, this could be returning that it is still finishing
-        time.sleep(0.1)
 
     return jsonify(message="Deleted")
 
@@ -1236,7 +1268,7 @@ class _RedisManager(object):
         return task_id
 
     def get_tasks_not_started(self):
-        task_ids = [key[len('{}:weblab:task_ids:'.format(self.key_base))]
+        task_ids = [key[len('{}:weblab:task_ids:'.format(self.key_base)):]
                     for key in self.client.keys('{}:weblab:task_ids:*'.format(self.key_base))]
 
         pipeline = self.client.pipeline()
@@ -1283,8 +1315,8 @@ class _RedisManager(object):
 
         return {
             'name': name,
-            'args': args,
-            'kwargs': kwargs,
+            'args': json.loads(args),
+            'kwargs': json.loads(kwargs),
             'session_id': session_id,
         }
 
@@ -1338,7 +1370,7 @@ class _RedisManager(object):
         task_ids = self.client.smembers('{}:weblab:{}:tasks'.format(self.key_base, session_id))
         pipeline = self.client.pipeline()
         for task_id in task_ids:
-            pipeline.hget('{}:weblab:tasks:{}'.format(self.key_base, session_id), 'finished')
+            pipeline.hget('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'finished')
 
         pending_task_ids = []
         for task_id, finished in zip(task_ids, pipeline.execute()):
@@ -1521,35 +1553,45 @@ def _status_time(session_id):
     return min(5, int(user.time_left))
 
 
-def _dispose_user(session_id):
+def _dispose_user(session_id, waiting):
     redis_manager = _current_redis()
     user = redis_manager.get_user(session_id)
     if user.is_anonymous:
         raise _NotFoundError()
 
-    if not user.active:
-        return
+    if user.active:
+        current_expired_user = user.to_expired_user()
+        deleted = redis_manager.delete_user(session_id, current_expired_user)
 
-    current_expired_user = user.to_expired_user()
-    deleted = redis_manager.delete_user(session_id, current_expired_user)
+        if deleted:
+            weblab = _current_weblab()
+            if weblab._on_dispose:
+                weblab._set_session_id(session_id)
+                _set_weblab_user_cache(user)
+                try:
+                    weblab._on_dispose()
+                except Exception:
+                    traceback.print_exc()
 
-    if deleted:
-        weblab = _current_weblab()
-        if weblab._on_dispose:
-            _set_weblab_user_cache(user)
-            try:
-                weblab._on_dispose()
-            except Exception:
-                traceback.print_exc()
-
-        unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
-        while unfinished_tasks:
             unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
+            while unfinished_tasks:
+                unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
+                time.sleep(0.1)
+
+            redis_manager.clean_session_tasks(session_id)
+
+            redis_manager.report_session_deleted(session_id)
+
+    if waiting:
+        # if another thread has started the _dispose process, it might take long
+        # to process it. But this (sessions) is the one that tells WebLab-Deusto
+        # that someone else can enter in this laboratory. So we should wait
+        # here until the process is over.
+
+        while not redis_manager.is_session_deleted(session_id):
+            # In the future, instead of waiting, this could be returning that it is still finishing
             time.sleep(0.1)
 
-        redis_manager.clean_session_tasks(session_id)
-
-        redis_manager.report_session_deleted(session_id)
 
 class _CleanerThread(threading.Thread):
     """

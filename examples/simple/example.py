@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import time
 from flask import Flask, session, url_for
 from flask_debugtoolbar import DebugToolbarExtension
 from weblablib import WebLab, requires_active, weblab_user, poll
@@ -21,7 +22,7 @@ app.config['WEBLAB_SESSION_ID_NAME'] = 'lab_session_id'
 # app.config['WEBLAB_TIMEOUT'] = 15 # in seconds, default value
 # app.config['WEBLAB_SCHEME'] = 'https'
 
-weblab = WebLab(app, base_url='/foo', callback_url='/lab/public')
+weblab = WebLab(app, callback_url='/lab/public')
 toolbar = DebugToolbarExtension(app)
 
 @weblab.initial_url
@@ -31,9 +32,9 @@ def initial_url():
 @weblab.on_start
 def on_start(client_data, server_data):
     print("New user!")
-    print(client_data)
-    print(server_data)
     print(weblab_user)
+    long_task(1, 2, sleep=0.5) # Run in the same thread
+    long_task.delay(3,4, sleep=30) # Send to a different thread
 
 @weblab.on_dispose
 def on_stop():
@@ -45,6 +46,12 @@ def on_stop():
 def lab():
     user = weblab_user
     return "Hello %s. You didn't poll in %.2f seconds (timeout configured to %s). Total time left: %s" % (user.username, user.time_without_polling, weblab.timeout, user.time_left)
+
+@weblab.task()
+def long_task(a, b, sleep):
+    print("Processing {} + {}".format(a, b))
+    time.sleep(sleep)
+    print("{} + {} is {}".format(a, b, a+b))
 
 @app.route("/")
 def index():
