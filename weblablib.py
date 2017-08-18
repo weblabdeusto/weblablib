@@ -12,16 +12,16 @@ learn a bit about it first:
 
    http://flask.pocoo.org/
 
-The library is designed to forget about the integration with WebLab-Deusto and make it easy. It 
+The library is designed to forget about the integration with WebLab-Deusto and make it easy. It
 provides:
 
  * A WebLab object. You must initialize it with the app. It will include a set of new web methods
-   that WebLab-Deusto uses. It also allows you to define what methods should be call on the 
+   that WebLab-Deusto uses. It also allows you to define what methods should be call on the
    beginning and end of the user session.
 
  * A set of methods to access information about the current information, such as ``weblab_user``,
    (which can be anonymous or not, active or not), ``requires_login`` (for methods which should
-   never be used by anonymous users), ``requires_active`` (for methods which should only be 
+   never be used by anonymous users), ``requires_active`` (for methods which should only be
    used by users who are supposed to be using the laboratory now), ``poll`` (to report WebLab
    that the user is still active) or ``logout`` (to report WebLab that the user left).
 
@@ -35,6 +35,7 @@ import abc
 import sys
 import json
 import time
+import atexit
 import base64
 import datetime
 import threading
@@ -50,15 +51,15 @@ from werkzeug import LocalProxy
 from flask import Blueprint, Response, jsonify, request, current_app, redirect, \
      url_for, g, session, after_this_request, render_template
 
-__all__ = ['WebLab', 
-            'logout', 'poll', 
-            'weblab_user', 
-            'requires_login', 'requires_active', 
-            'CurrentUser', 'AnonymousUser', 'ExpiredUser']
+__all__ = ['WebLab',
+           'logout', 'poll',
+           'weblab_user',
+           'requires_login', 'requires_active',
+           'CurrentUser', 'AnonymousUser', 'ExpiredUser']
 
 class ConfigurationKeys(object):
     """
-    ConfigurationKeys represents all the configuration keys available in weblablib. 
+    ConfigurationKeys represents all the configuration keys available in weblablib.
     """
 
     # # # # # # # # # #
@@ -98,12 +99,12 @@ class ConfigurationKeys(object):
     # Redis URL for storing information
     WEBLAB_REDIS_URL = 'WEBLAB_REDIS_URL'
 
-    # Redis base. If you have more than one lab in the same Redis server, 
+    # Redis base. If you have more than one lab in the same Redis server,
     # you can use this variable to make it work without conflicts. By default
     # it's lab, so all the keys will be "lab:weblab:active:session-id", for example
     WEBLAB_REDIS_BASE = 'WEBLAB_REDIS_BASE'
 
-    # How long the results of the tasks should be stored in Redis? In seconds. 
+    # How long the results of the tasks should be stored in Redis? In seconds.
     # By default one hour.
     WEBLAB_TASK_EXPIRES = 'WEBLAB_TASK_EXPIRES'
 
@@ -144,6 +145,10 @@ class ConfigurationKeys(object):
     # be 10 threads, but it shouldn't be a problem since they're synchronized with
     # Redis internally.
     WEBLAB_AUTOCLEAN_THREAD = 'WEBLAB_AUTOCLEAN_THREAD'
+
+    # You can either call "flask run-tasks" or rely on the threads created
+    # for running threads.
+    WEBLAB_TASK_THREADS_PROCESS = 'WEBLAB_TASK_THREADS_PROCESS'
 
 
 
@@ -200,6 +205,8 @@ class WebLab(object):
         self._tasks = {
             # task_id: _Task
         }
+
+        self._task_threads = []
 
         if app is not None:
             self.init_app(app)
@@ -283,7 +290,7 @@ class WebLab(object):
         def weblab_poll_url(session_id):
             if session.get(self._session_id_name) != session_id:
                 return jsonify(success=False, reason="Different session identifier")
-                
+
             if not self._redis_manager.session_exists(session_id):
                 return jsonify(success=False, reason="Not found")
 
@@ -320,12 +327,15 @@ class WebLab(object):
                 raise ValueError("Invalid configuration. Missing {}".format(key))
 
         def weblab_poll_script():
-            weblab_timeout = int(1000 * self.timeout // 2)
+            """
+            Create a HTML script that calls poll automatically.
+            """
+            weblab_timeout = int(1000 * self.timeout / 2)
             return """<script>
             var WEBLAB_TIMEOUT = setInterval(function () {
-                $.get("{url}")
-            }, {timeout} )
-            </script>""".format(timeout=weblab_timeout)
+                $.get("%(url)s")
+            }, %(timeout)s )
+            </script>""" % dict(timeout=weblab_timeout, url=url_for('weblab_poll_url'))
 
         @self._app.context_processor
         def weblab_context_processor():
@@ -336,6 +346,10 @@ class WebLab(object):
             def clean_expired_users():
                 self.clean_expired_users()
 
+            @self._app.cli.command('run-tasks')
+            def run_tasks():
+                self.run_tasks()
+
             @self._app.cli.command('fake-new-user')
             @click.option('--name', default='John Smith', help="First and last name")
             @click.option('--username', default='john.smith', help="Username passed")
@@ -343,17 +357,18 @@ class WebLab(object):
             @click.option('--time', default=300, help="Time in seconds passed to the laboratory")
             @click.option('--back', default='http://weblab.deusto.es', help="URL to send the user back")
             @click.option('--open-browser', is_flag=True, help="Open the fake use in a web browser")
-            def fake_user(name, username, username_unique, time, back, open_browser):
-                time = float(time)
-                
+            def fake_user(name, username, username_unique, assigned_time, back, open_browser):
+                assigned_time = float(assigned_time)
+
                 start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
 
                 request_data = {
                     'client_initial_data': {},
                     'server_initial_data': {
                         'priority.queue.slot.start': start_time,
-                        'priority.queue.slot.length': time,
+                        'priority.queue.slot.length': assigned_time,
                         'request.username': username,
+                        'request.full_name': name,
                         'request.username.unique': username_unique,
                     },
                     'back': back,
@@ -399,7 +414,7 @@ class WebLab(object):
                     print("Not found")
                 else:
                     print("Deleted")
-            
+
             if not self._app.config.get('SERVER_NAME'):
                 if 'fake-new-user' in sys.argv:
                     server_name = os.environ.get('SERVER_NAME')
@@ -414,8 +429,15 @@ class WebLab(object):
                     self._app.config['SERVER_NAME'] = server_name
 
         if self._app.config.get('WEBLAB_AUTOCLEAN_THREAD', True):
-            self._cleaner_thread = _CleanerThread(self._app)
+            self._cleaner_thread = _CleanerThread(self, self._app)
             self._cleaner_thread.start()
+
+        threads_per_process = self._app.config.get('WEBLAB_TASK_THREADS_PROCESS', 3)
+        if threads_per_process > 0: # If set to 0, no thread is running
+            for number in range(threads_per_process):
+                task_thread = _TaskRunner(number, self, self._app)
+                self._task_threads.append(task_thread)
+                task_thread.start()
 
         self._initialized = True
 
@@ -423,7 +445,13 @@ class WebLab(object):
         """
         Return the session identifier from the Flask session object
         """
+        if hasattr(g, 'session_id'):
+            return g.session_id
+
         return session.get(self._session_id_name)
+
+    def _set_session_id(self, session_id): #pylint: disable=no-self-use
+        g.session_id = session_id
 
     def _forbidden_handler(self):
         if self._redirection_on_forbiden:
@@ -449,7 +477,7 @@ class WebLab(object):
     def on_start(self, func):
         """
         Register a method for being called when a new user comes. The format is:
-        
+
         @weblab.on_start
         def start(client_data, server_data):
             return data # simple data, e.g., None, a dict, a list... that will be available as weblab_user.data
@@ -464,7 +492,7 @@ class WebLab(object):
     def on_dispose(self, func):
         """
         Register a method for being called when a new user comes.
-        
+
         @weblab.on_dispose
         def dispose():
             pass
@@ -493,6 +521,43 @@ class WebLab(object):
             except Exception:
                 traceback.print_exc()
 
+
+    def run_tasks(self):
+        task_ids = self._redis_manager.get_tasks_not_started()
+
+        for task_id in task_ids:
+            task_data = self._redis_manager.start_task(task_id)
+
+            if task_data is None:
+                # Someone else took the task
+                continue
+
+            func_name = task_data['name']
+            args = task_data['args']
+            kwargs = task_data['kwargs']
+            session_id = task_data['session_id']
+
+            func = self._task_functions.get(func_name)
+            if func is None:
+                self._redis_manager.finish_task(task_id, error={
+                    'code': 'not-found',
+                    'message': "Task {} not found".format(func_name),
+                })
+                continue
+
+            self._set_session_id(session_id)
+            try:
+                result = func(*args, **kwargs)
+            except Exception as error:
+                self._redis_manager.finish_task(task_id, error={
+                    'code': 'exception',
+                    'class': type(error).__name__,
+                    'message': unicode(error),
+                })
+            else:
+                self._redis_manager.finish_task(task_id, result=result)
+
+
     def task(self):
         """
         A task is a function that can be called later on by the WebLab wrapper. It is a set
@@ -513,16 +578,16 @@ class WebLab(object):
         task_result.status # Either submitted, running, done or failed
         task_result.result # If done
         task_result.error # If failed
-        
+
         Later on, you can get tasks by running:
 
         task_result = weblab.get_task(task_id)
-        
+
         """
-        # 
+        #
         # In the future, weblab.task() will have other parameters, such as
         # discard_result (so the redis record is immediately discarded)
-        # 
+        #
         def task_wrapper(func):
             wrapper = _TaskWrapper(self, func)
             if func.__name__ in self._task_functions:
@@ -775,7 +840,7 @@ def _set_weblab_user_cache(user):
     g.weblab_user = user
     return user
 
-weblab_user = LocalProxy(_weblab_user)
+weblab_user = LocalProxy(_weblab_user) # pylint: disable=invalid-name
 
 def requires_login(redirect_back=True, current_only=False):
     """
@@ -829,7 +894,7 @@ def logout():
 #
 #
 
-_weblab_blueprint = Blueprint("weblab", __name__)
+_weblab_blueprint = Blueprint("weblab", __name__) # pylint: disable=invalid-name
 
 
 
@@ -903,16 +968,20 @@ def _process_start_request(request_data):
     # Parse the initial date + assigned time to know the maximum time
     start_date_str = server_initial_data['priority.queue.slot.start']
     start_date_str, microseconds = start_date_str.split('.')
-    start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d %H:%M:%S") + datetime.timedelta(microseconds=int(microseconds))
-    max_date = start_date + datetime.timedelta(seconds=float(server_initial_data['priority.queue.slot.length']))
+    difference = datetime.timedelta(microseconds=int(microseconds))
+    start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d %H:%M:%S") + difference
+    slot_length = float(server_initial_data['priority.queue.slot.length'])
+    max_date = start_date + datetime.timedelta(seconds=slot_length)
 
     # Create a global session
     session_id = _create_token()
 
     # Prepare adding this to redis
-    user = CurrentUser(session_id=session_id, back=request_data['back'], last_poll=_current_timestamp(), max_date=float(_to_timestamp(max_date)),
-                username=server_initial_data['request.username'], username_unique=server_initial_data['request.username.unique'],
-                exited=False, data=None)
+    user = CurrentUser(session_id=session_id, back=request_data['back'],
+                       last_poll=_current_timestamp(), max_date=float(_to_timestamp(max_date)),
+                       username=server_initial_data['request.username'],
+                       username_unique=server_initial_data['request.username.unique'],
+                       exited=False, data=None)
 
     redis_manager = _current_redis()
 
@@ -967,6 +1036,15 @@ def _dispose_experiment(session_id):
     except _NotFoundError:
         return jsonify(message="Not found")
 
+    # if another thread has started the _dispose process, it might take long
+    # to process it. But this (sessions) is the one that tells WebLab-Deusto
+    # that someone else can enter in this laboratory. So we should wait
+    # here until the process is over.
+
+    while not _current_redis().is_session_deleted(session_id):
+        # In the future, instead of waiting, this could be returning that it is still finishing
+        time.sleep(0.1)
+
     return jsonify(message="Deleted")
 
 
@@ -995,8 +1073,16 @@ class _RedisManager(object):
         pipeline.hset(key, 'data', json.dumps(user.data))
         pipeline.hset(key, 'back', user.back)
         pipeline.hset(key, 'exited', json.dumps(user.exited))
+        pipeline.set('{}:weblab:sessions:{}'.format(self.key_base, session_id), time.time())
         pipeline.expire(key, expiration)
+        pipeline.expire('{}:weblab:sessions:{}'.format(self.key_base, session_id), expiration + 300)
         pipeline.execute()
+
+    def is_session_deleted(self, session_id):
+        return self.client.get('{}:weblab:sessions:{}'.format(self.key_base, session_id)) is None
+
+    def report_session_deleted(self, session_id):
+        self.client.delete('{}:weblab:sessions:{}'.format(self.key_base, session_id))
 
     def update_data(self, session_id, data):
         key = '{}:weblab:active:{}'.format(self.key_base, session_id)
@@ -1017,10 +1103,10 @@ class _RedisManager(object):
         back, last_poll, max_date, username, username_unique, data, exited = pipeline.execute()
 
         if max_date is not None:
-            return CurrentUser(session_id=session_id, back=back, last_poll=float(last_poll), 
-                        max_date=float(max_date), username=username, 
-                        username_unique=username_unique, 
-                        data=json.loads(data), exited=json.loads(exited))
+            return CurrentUser(session_id=session_id, back=back, last_poll=float(last_poll),
+                               max_date=float(max_date), username=username,
+                               username_unique=username_unique,
+                               data=json.loads(data), exited=json.loads(exited))
 
         return self.get_expired_user(session_id)
 
@@ -1033,9 +1119,9 @@ class _RedisManager(object):
         back, max_date, username, username_unique, data = pipeline.execute()
 
         if max_date is not None:
-            return ExpiredUser(session_id=session_id, back=back, max_date=float(max_date), 
-                            username=username, username_unique=username_unique, 
-                            data=json.loads(data))
+            return ExpiredUser(session_id=session_id, back=back, max_date=float(max_date),
+                               username=username, username_unique=username_unique,
+                               data=json.loads(data))
 
         return AnonymousUser()
 
@@ -1090,7 +1176,7 @@ class _RedisManager(object):
 
                 elif user.time_without_polling >= self.weblab.timeout:
                     expired_sessions.append(session_id)
-                    
+
         return expired_sessions
 
     def session_exists(self, session_id, retrieve_expired=True):
@@ -1113,9 +1199,9 @@ class _RedisManager(object):
             # If the user was deleted in between, revert the last_poll
             self.client.delete(key)
 
-    # 
+    #
     # Task-related Redis methods
-    # 
+    #
     def new_task(self, session_id, name, args, kwargs):
         """
         Get a new function, args and kwargs, and return the task_id.
@@ -1130,7 +1216,7 @@ class _RedisManager(object):
             if results[0]:
                 # Ensure it's unique
                 break
-            
+
             # Otherwise try with another
             task_id = _create_token()
 
@@ -1150,15 +1236,15 @@ class _RedisManager(object):
         return task_id
 
     def get_tasks_not_started(self):
-        task_ids = [ key[len('{}:weblab:task_ids:'.format(self.key_base))] 
-                for key in self.client.keys('{}:weblab:task_ids:*'.format(self.key_base)) ]
+        task_ids = [key[len('{}:weblab:task_ids:'.format(self.key_base))]
+                    for key in self.client.keys('{}:weblab:task_ids:*'.format(self.key_base))]
 
         pipeline = self.client.pipeline()
         for task_id in task_ids:
             pipeline.hget('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'running')
 
         results = pipeline.execute()
-        
+
         not_started = []
 
         for task_id, running in zip(task_ids, results):
@@ -1169,8 +1255,8 @@ class _RedisManager(object):
 
     def start_task(self, task_id):
         """
-        Mark a task as running. 
-        
+        Mark a task as running.
+
         If it exists, return a dictionary with name, args, kwargs and session_id
 
         If it doesn't exist or is taken by other thread, return None
@@ -1183,7 +1269,7 @@ class _RedisManager(object):
         pipeline.hget(key, 'args')
         pipeline.hget(key, 'kwargs')
         pipeline.hget(key, 'session_id')
-        
+
         running, name, args, kwargs, session_id = pipeline.execute()
         if not running:
             # other thread did the hset first
@@ -1202,7 +1288,7 @@ class _RedisManager(object):
             'session_id': session_id,
         }
 
-    def finish_task(self, task_id, result = None, error = None):
+    def finish_task(self, task_id, result=None, error=None):
         if error and result:
             raise ValueError("You can't provide result and error: either one or the other")
         key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
@@ -1253,7 +1339,7 @@ class _RedisManager(object):
         pipeline = self.client.pipeline()
         for task_id in task_ids:
             pipeline.hget('{}:weblab:tasks:{}'.format(self.key_base, session_id), 'finished')
-        
+
         pending_task_ids = []
         for task_id, finished in zip(task_ids, pipeline.execute()):
             if finished == 'false': # If finished or failed: true; if expired: None
@@ -1270,11 +1356,11 @@ class _RedisManager(object):
             pipeline.delete('{}:weblab:tasks:{}'.format(self.key_base, session_id), 'finished')
         pipeline.execute()
 
-###################################################################################### 
-# 
-# 
+######################################################################################
+#
+#
 #     Task management
-# 
+#
 
 class _TaskWrapper(object):
     def __init__(self, weblab, func):
@@ -1307,7 +1393,7 @@ class WebLabTask(object):
     @property
     def _task_data(self):
         return self._redis_manager.get_task(self._task_id)
-        
+
     @property
     def session_id(self):
         task_data = self._task_data
@@ -1353,62 +1439,36 @@ class WebLabTask(object):
 
 
 class _TaskRunner(threading.Thread):
+
+    _instances = []
+
     def __init__(self, number, weblab, app):
         super(_TaskRunner, self).__init__()
         self.name = 'weblab-task-runner-{}'.format(number)
         self.daemon = True
         self.app = app
         self.weblab = weblab
-        self._redis_manager = weblab._redis_manager
         self._stopping = False
 
     def stop(self):
         self._stopping = True
 
     def run(self):
+        _TaskRunner._instances.append(self)
+
         while not self._stopping:
-            time.sleep(1)
             try:
                 with self.app.app_context():
-                    task_ids = self._redis_manager.get_tasks_not_started()
+                    self.weblab.run_tasks()
 
-                for task_id in task_ids:
-                    with self.app.app_context():
-                        task_data = self._redis_manager.start_task(task_id)
-
-                        if task_data is None:
-                            # Someone else took the task
-                            continue
-                        
-                        func_name = task_data['name']
-                        args = task_data['args']
-                        kwargs = task_data['kwargs']
-                        session_id = task_data['session_id']
-
-                        func = self.weblab._task_functions.get(func_name)
-                        if func is None:
-                            self._redis_manager.finish_task(task_id, error = {
-                                'code': 'not-found',
-                                'message': "Task {} not found".format(func_name),
-                            })
-                            continue
-                        
-                        try:
-                            result = func(*args, **kwargs)
-                        except Exception as e:
-                            self._redis_manager.finish_task(task_id, error = {
-                                'code': 'exception',
-                                'class': type(e).__name__,
-                                'message': unicode(e),
-                            })
-                        else:
-                            self._redis_manager.finish_task(task_id, result = result)
-
-
-            except Exception as e:
+            except Exception:
                 traceback.print_exc()
                 continue
-                
+
+            for _ in xrange(20):
+                time.sleep(0.05)
+                if self._stopping:
+                    break
 
 
 ######################################################################################
@@ -1429,8 +1489,8 @@ def _current_redis():
 def _current_session_id():
     return _current_weblab()._session_id()
 
-def _to_timestamp(dt):
-    return str(int(time.mktime(dt.timetuple()))) + str(dt.microsecond / 1e6)[1:]
+def _to_timestamp(dtime):
+    return str(int(time.mktime(dtime.timetuple()))) + str(dtime.microsecond / 1e6)[1:]
 
 def _current_timestamp():
     return float(_to_timestamp(datetime.datetime.now()))
@@ -1483,34 +1543,56 @@ def _dispose_user(session_id):
                 traceback.print_exc()
 
         unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
-        while len(unfinished_tasks) > 0:
+        while unfinished_tasks:
             unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
             time.sleep(0.1)
-        
-        # TODO: if calling /dispose, the method should be waiting until this process is over
-        # right now if someone else (like a thread) calls to sleep, it will not wait anything
-        # and the next student will come in, which is a big issue.
+
         redis_manager.clean_session_tasks(session_id)
+
+        redis_manager.report_session_deleted(session_id)
 
 class _CleanerThread(threading.Thread):
     """
     _CleanerThread is a thread that keeps calling the _clean_expired_users. It is optional, activated with WEBLAB_AUTOCLEAN_THREAD
     """
 
-    def __init__(self, app):
+    _instances = []
+
+    def __init__(self, weblab, app):
         super(_CleanerThread, self).__init__()
         self.app = app
         self.name = "WebLabCleaner"
+        self.weblab = weblab
         self.daemon = True
+        self._stopping = False
+
+    def stop(self):
+        self._stopping = True
 
     def run(self):
-        while True:
-            time.sleep(5)
+        _CleanerThread._instances.append(self)
+
+        while not self._stopping:
             try:
                 with self.app.app_context():
-                    _current_weblab().clean_expired_users()
+                    self.weblab.clean_expired_users()
             except Exception:
                 traceback.print_exc()
 
+            for _ in xrange(100):
+                time.sleep(0.05)
+                if self._stopping:
+                    break
+
 class _NotFoundError(Exception):
     pass
+
+@atexit.register
+def _on_exit():
+    all_threads = _CleanerThread._instances + _TaskRunner._instances
+
+    for instance in all_threads:
+        instance.stop()
+
+    for instance in all_threads:
+        instance.join()
