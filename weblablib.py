@@ -1147,6 +1147,7 @@ class _RedisManager(object):
         # Missing (normal): running. When created, we know if it's a new key and therefore that
         # no other thread is processing it.
         pipeline.execute()
+        return task_id
 
     def get_tasks_not_started(self):
         task_ids = [ key[len('{}:weblab:task_ids:'.format(self.key_base))] 
@@ -1201,12 +1202,73 @@ class _RedisManager(object):
             'session_id': session_id,
         }
 
-    def finish_task(self, task_id, result, error):
-        pass # TODO
+    def finish_task(self, task_id, result = None, error = None):
+        if error and result:
+            raise ValueError("You can't provide result and error: either one or the other")
+        key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
+
+        pipeline = self.client.pipeline()
+        pipeline.hget(key, 'session_id')
+        pipeline.hset(key, 'finished', 'true')
+        pipeline.hset(key, 'result', json.dumps(result))
+        pipeline.hset(key, 'error', json.dumps(error))
+        results = pipeline.execute()
+        if not results[0]:
+            # If it had been deleted... delete it
+            self.client.delete(key)
 
     def get_task(self, task_id):
-        pass # TODO: return the task, finished, etc.
+        key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
 
+        pipeline = self.client.pipeline()
+        pipeline.hget(key, 'session_id')
+        pipeline.hget(key, 'finished')
+        pipeline.hget(key, 'error')
+        pipeline.hget(key, 'result')
+        pipeline.hget(key, 'running')
+        session_id, finished, error, result, running = pipeline.execute()
+
+        if session_id is None:
+            return None
+
+        if not running:
+            status = 'submitted'
+        elif finished == 'true':
+            if error:
+                status = 'failed'
+            else:
+                status = 'done'
+        else:
+            status = 'running'
+
+        return {
+            'result': result,
+            'error': error,
+            'status': status,
+            'session_id': session_id,
+        }
+
+    def get_unfinished_tasks(self, session_id):
+        task_ids = self.client.smembers('{}:weblab:{}:tasks'.format(self.key_base, session_id))
+        pipeline = self.client.pipeline()
+        for task_id in task_ids:
+            pipeline.hget('{}:weblab:tasks:{}'.format(self.key_base, session_id), 'finished')
+        
+        pending_task_ids = []
+        for task_id, finished in zip(task_ids, pipeline.execute()):
+            if finished == 'false': # If finished or failed: true; if expired: None
+                pending_task_ids.append(task_id)
+
+        return pending_task_ids
+
+    def clean_session_tasks(self, session_id):
+        task_ids = self.client.smembers('{}:weblab:{}:tasks'.format(self.key_base, session_id))
+
+        pipeline = self.client.pipeline()
+        pipeline.delete('{}:weblab:{}:tasks'.format(self.key_base, session_id))
+        for task_id in task_ids:
+            pipeline.delete('{}:weblab:tasks:{}'.format(self.key_base, session_id), 'finished')
+        pipeline.execute()
 
 ###################################################################################### 
 # 
@@ -1216,33 +1278,55 @@ class _RedisManager(object):
 
 class _TaskWrapper(object):
     def __init__(self, weblab, func):
-        self.func = func
-        self.name = func.__name__
-        self.weblab = weblab
+        self._func = func
+        self._name = func.__name__
+        self._weblab = weblab
+        self._redis_manager = weblab._redis_manager
 
     def __call__(self, *args, **kwargs):
-        return self.func(*args, **kwargs)
+        return self._func(*args, **kwargs)
 
     def delay(self, *args, **kwargs):
-        pass # TODO
-
-    def delay_name(self, name, *args, **kwargs):
-        pass # TODO
-
-# TODO: implement these two classes
+        session_id = _current_session_id()
+        task_id = self._redis_manager.new_task(session_id, self._name, args, kwargs)
+        return WebLabTask(self._weblab, task_id)
 
 class WebLabTask(object):
     def __init__(self, weblab, task_id):
-        self.weblab = weblab
+        self._weblab = weblab
+        self._redis_manager = weblab._redis_manager
         self._task_id = task_id
 
     @property
     def task_id(self):
+        """
+        Returns the task identifier.
+        """
         return self._task_id
 
     @property
+    def _task_data(self):
+        return self._redis_manager.get_task(self._task_id)
+        
+    @property
+    def session_id(self):
+        task_data = self._task_data
+        if task_data:
+            return task_data['session_id']
+
+    @property
     def status(self):
-        pass # TODO
+        """
+        Current status:
+         - submitted (not yet processed by a thread)
+         - done (finished)
+         - failed (there was an error)
+         - running (still running in a thread)
+         - None (if the task does not exist anymore)
+        """
+        task_data = self._task_data
+        if task_data:
+            return task_data['status']
 
     @property
     def result(self):
@@ -1250,7 +1334,9 @@ class WebLabTask(object):
         In case of finishing (task.status == 'done'), this returns the result.
         Otherwise, it returns None.
         """
-        pass # TODO
+        task_data = self._task_data
+        if task_data:
+            return task_data['result']
 
     @property
     def error(self):
@@ -1258,7 +1344,13 @@ class WebLabTask(object):
         In case of error (task.status == 'failed'), this returns the Exception
         that caused the error. Otherwise, it returns None.
         """
-        pass # TODO
+        task_data = self._task_data
+        if task_data:
+            return task_data['result']
+
+    def __repr__(self):
+        return '<WebLab Task {}>'.format(self._task_id).encode('utf8')
+
 
 class _TaskRunner(threading.Thread):
     def __init__(self, number, weblab, app):
@@ -1267,6 +1359,7 @@ class _TaskRunner(threading.Thread):
         self.daemon = True
         self.app = app
         self.weblab = weblab
+        self._redis_manager = weblab._redis_manager
         self._stopping = False
 
     def stop(self):
@@ -1275,8 +1368,47 @@ class _TaskRunner(threading.Thread):
     def run(self):
         while not self._stopping:
             time.sleep(1)
-            with self.app.app_context():
-                pass # TODO: make a method to process tasks
+            try:
+                with self.app.app_context():
+                    task_ids = self._redis_manager.get_tasks_not_started()
+
+                for task_id in task_ids:
+                    with self.app.app_context():
+                        task_data = self._redis_manager.start_task(task_id)
+
+                        if task_data is None:
+                            # Someone else took the task
+                            continue
+                        
+                        func_name = task_data['name']
+                        args = task_data['args']
+                        kwargs = task_data['kwargs']
+                        session_id = task_data['session_id']
+
+                        func = self.weblab._task_functions.get(func_name)
+                        if func is None:
+                            self._redis_manager.finish_task(task_id, error = {
+                                'code': 'not-found',
+                                'message': "Task {} not found".format(func_name),
+                            })
+                            continue
+                        
+                        try:
+                            result = func(*args, **kwargs)
+                        except Exception as e:
+                            self._redis_manager.finish_task(task_id, error = {
+                                'code': 'exception',
+                                'class': type(e).__name__,
+                                'message': unicode(e),
+                            })
+                        else:
+                            self._redis_manager.finish_task(task_id, result = result)
+
+
+            except Exception as e:
+                traceback.print_exc()
+                continue
+                
 
 
 ######################################################################################
@@ -1349,6 +1481,16 @@ def _dispose_user(session_id):
                 weblab._on_dispose()
             except Exception:
                 traceback.print_exc()
+
+        unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
+        while len(unfinished_tasks) > 0:
+            unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
+            time.sleep(0.1)
+        
+        # TODO: if calling /dispose, the method should be waiting until this process is over
+        # right now if someone else (like a thread) calls to sleep, it will not wait anything
+        # and the next student will come in, which is a big issue.
+        redis_manager.clean_session_tasks(session_id)
 
 class _CleanerThread(threading.Thread):
     """
