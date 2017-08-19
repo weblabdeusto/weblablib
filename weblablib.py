@@ -131,7 +131,7 @@ class ConfigurationKeys(object):
 
     # Once a user is moved to inactive, the session has to expire at some point.
     # Establish in seconds in how long (defaults to 3600, which is one hour)
-    WEBLAB_PAST_USERS_TIMEOUT = 'WEBLAB_PAST_USERS_TIMEOUT'
+    WEBLAB_EXPIRED_USERS_TIMEOUT = 'WEBLAB_EXPIRED_USERS_TIMEOUT'
 
     # In some rare occasions, it may happen that the dispose method is not called.
     # For example, if the Experiment server suddenly has no internet for a temporary
@@ -207,12 +207,26 @@ class WebLab(object):
         if app is not None:
             self.init_app(app)
 
+    def _cleanup(self):
+        old_threads = []
+        for task_thread in self._task_threads:
+            task_thread.stop()
+            old_threads.append(task_thread)
+
+        if self._cleaner_thread:
+            self._cleaner_thread.stop()
+            old_threads.append(self._cleaner_thread)
+
+        for old_thread in old_threads:
+            old_thread.join()
+
     def init_app(self, app):
         """
         Initialize the app. This method MUST be called (unless 'app' is provided in the constructor of WebLab)
         """
         if self._initialized:
-            return
+            # Clean
+            self._cleanup()
 
         if app is None:
             raise ValueError("app must be a Flask app")
@@ -1178,7 +1192,7 @@ class _RedisManager(object):
 
         # During half an hour after being created, the user is redirected to
         # the original URL. After that, every record of the user has been deleted
-        pipeline.expire("{}:weblab:inactive:{}".format(self.key_base, session_id), current_app.config.get(ConfigurationKeys.WEBLAB_PAST_USERS_TIMEOUT, 3600))
+        pipeline.expire("{}:weblab:inactive:{}".format(self.key_base, session_id), current_app.config.get(ConfigurationKeys.WEBLAB_EXPIRED_USERS_TIMEOUT, 3600))
         results = pipeline.execute()
 
         return results[0] != 0 # If redis returns 0 on delete() it means that it was not deleted

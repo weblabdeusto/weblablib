@@ -17,12 +17,12 @@ classifiers=[
 cp_license="BSD 2-clause"
 
 setup(name='weblablib',
-      version='0.1',
+      version='0.2',
       description="WebLab-Deusto library for creating unmanaged laboratories",
       classifiers=classifiers,
       author='WebLab-Deusto team',
       author_email='weblab@deusto.es',
-      url='http://github.com/weblabdeusto/weblablib/',
+      url='https://weblablib.readthedocs.org/',
       license=cp_license,
       py_modules=['weblablib'],
       install_requires=['redis', 'flask'],
