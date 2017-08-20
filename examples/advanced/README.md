@@ -17,6 +17,15 @@ This is a more advanced example of how to use **weblablib**.
 
 ## Deployment
 
+### Install the dependencies
+
+You will need to create a virtual environment, and then install all the requirements:
+
+```shell
+
+ $ pip install -r requirements.txt
+```
+
 ### Running it for development
 
 So as to run it, in Linux / Mac OS X:
