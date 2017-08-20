@@ -44,6 +44,7 @@ import webbrowser
 
 from functools import wraps
 
+import six
 import redis
 import click
 
@@ -497,7 +498,7 @@ class WebLab(object):
 
         threads_per_process = self._app.config.get('WEBLAB_TASK_THREADS_PROCESS', 3)
         if threads_per_process > 0: # If set to 0, no thread is running
-            for number in range(threads_per_process):
+            for number in six.moves.range(threads_per_process):
                 task_thread = _TaskRunner(number, self, self._app)
                 self._task_threads.append(task_thread)
                 task_thread.start()
@@ -692,12 +693,10 @@ class WebLabUser(object):
         """Was the user a valid user recently?"""
 
     @abc.abstractmethod
-    def __unicode__(self):
-        """Unicode representation"""
-
     def __str__(self):
-        return self.__unicode__().encode('utf8')
+        """str representation"""
 
+@six.python_2_unicode_compatible
 class AnonymousUser(WebLabUser):
     @property
     def active(self):
@@ -707,9 +706,10 @@ class AnonymousUser(WebLabUser):
     def is_anonymous(self):
         return True
 
-    def __unicode__(self):
+    def __str__(self):
         return "Anonymous user"
 
+@six.python_2_unicode_compatible
 class CurrentUser(WebLabUser):
     """
     This class represents a user which is still actively using a laboratory. If the session expires, it will become a ExpiredUser.
@@ -799,9 +799,10 @@ class CurrentUser(WebLabUser):
     def is_anonymous(self):
         return False
 
-    def __unicode__(self):
-        return u'Current user (id: {!r}): {!r} ({!r}), last poll: {:.2f} seconds ago. Max date in {:.2f} seconds. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self.time_without_polling, self._max_date - _current_timestamp(), self._back)
+    def __str__(self):
+        return 'Current user (id: {!r}): {!r} ({!r}), last poll: {:.2f} seconds ago. Max date in {:.2f} seconds. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self.time_without_polling, self._max_date - _current_timestamp(), self._back)
 
+@six.python_2_unicode_compatible
 class ExpiredUser(WebLabUser):
     """
     This class represents a user which has been kicked out already. Typically this ExpiredUser is kept in redis for around an hour.
@@ -856,8 +857,8 @@ class ExpiredUser(WebLabUser):
     def is_anonymous(self):
         return False
 
-    def __unicode__(self):
-        return u'Expired user (id: {!r}): {!r} ({!r}), max date in {:.2f} seconds. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self._max_date - _current_timestamp(), self._back)
+    def __str__(self):
+        return 'Expired user (id: {!r}): {!r} ({!r}), max date in {:.2f} seconds. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self._max_date - _current_timestamp(), self._back)
 
 ##################################################################################################################
 #
@@ -1123,7 +1124,7 @@ def _dispose_experiment(session_id):
 class _RedisManager(object):
 
     def __init__(self, redis_url, key_base, task_expires, weblab):
-        self.client = redis.StrictRedis.from_url(redis_url)
+        self.client = redis.StrictRedis.from_url(redis_url, decode_responses=True)
         self.weblab = weblab
         self.key_base = key_base
         self.task_expires = task_expires
@@ -1451,6 +1452,13 @@ class WebLabTask(object):
         self._task_id = task_id
 
     @property
+    def id(self):
+        """
+        Returns the task identifier.
+        """
+        return self._task_id
+
+    @property
     def task_id(self):
         """
         Returns the task identifier.
@@ -1532,7 +1540,7 @@ class _TaskRunner(threading.Thread):
                 traceback.print_exc()
                 continue
 
-            for _ in xrange(20):
+            for _ in six.moves.range(20):
                 time.sleep(0.05)
                 if self._stopping:
                     break
@@ -1564,7 +1572,9 @@ def _current_timestamp():
 
 def _create_token():
     tok = os.urandom(32)
-    return base64.urlsafe_b64encode(tok).strip().replace('=', '').replace('-', '_').decode('utf8')
+    safe_token = base64.urlsafe_b64encode(tok).strip().replace(b'=', b'').replace(b'-', b'_')
+    safe_token = safe_token.decode('utf8')
+    return safe_token
 
 def _status_time(session_id):
     weblab = _current_weblab()
@@ -1656,7 +1666,7 @@ class _CleanerThread(threading.Thread):
             except Exception:
                 traceback.print_exc()
 
-            for _ in xrange(100):
+            for _ in six.moves.range(100):
                 time.sleep(0.05)
                 if self._stopping:
                     break
