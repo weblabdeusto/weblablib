@@ -28,7 +28,7 @@ class Config(object):
     # These URLs should change to customize your lab:
     WEBLAB_CALLBACK_URL = '/mylab/callback'
     SESSION_COOKIE_NAME = 'mylab'
-    SESSION_COOKIE_PATH = '/mylab'
+    SESSION_COOKIE_PATH = '/'
     WEBLAB_SESSION_ID_NAME = 'mylab'
     WEBLAB_REDIS_BASE = 'mylab'
 

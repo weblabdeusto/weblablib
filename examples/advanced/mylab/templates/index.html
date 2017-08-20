@@ -1,0 +1,11 @@
+{% extends "_bootstrap.html" %}
+
+{% block body %}
+    {{ super() }}
+    :-)
+{% endblock %}
+
+{% block scripts %}
+    {# This comes by default from weblablib, while it requires to have JQuery previously imported #}
+    {{ weblab_poll_script() }}
+{% endblock %}

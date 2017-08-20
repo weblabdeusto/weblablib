@@ -49,7 +49,7 @@ import click
 
 from werkzeug import LocalProxy
 from flask import Blueprint, Response, jsonify, request, current_app, redirect, \
-     url_for, g, session, after_this_request, render_template
+     url_for, g, session, after_this_request, render_template, Markup
 
 __all__ = ['WebLab',
            'logout', 'poll',
@@ -341,15 +341,35 @@ class WebLab(object):
             Create a HTML script that calls poll automatically.
             """
             weblab_timeout = int(1000 * self.timeout / 2)
-            return """<script>
-            var WEBLAB_TIMEOUT = setInterval(function () {
-                $.get("%(url)s")
-            }, %(timeout)s )
-            </script>""" % dict(timeout=weblab_timeout, url=url_for('weblab_poll_url'))
+            session_id = _current_session_id()
+            if session_id:
+                return Markup("""<script>
+                var WEBLAB_TIMEOUT = null;
+                if (window.jQuery !== undefined) {
+                    WEBLAB_TIMEOUT = setInterval(function () {
+                        $.get("%(url)s").done(function(result) {
+                            if(!result.success)
+                                clearInterval(WEBLAB_TIMEOUT);
+                        }).fail(function() {
+                            clearInterval(WEBLAB_TIMEOUT);
+                        });
+                    }, %(timeout)s )
+                } else {
+                    var msg = "weblablib error: jQuery not loaded BEFORE {{ weblab_poll_script() }}. Can't poll";
+                    if (console && console.error) {
+                        console.error(msg);
+                    } else if (console && console.log) {
+                        console.log(msg);
+                    } else {
+                        alert(msg);
+                    }
+                }
+                </script>""" % dict(timeout=weblab_timeout, url=url_for('weblab_poll_url', session_id=session_id)))
+            return Markup("<!-- session_id not found; no script -->")
 
         @self._app.context_processor
         def weblab_context_processor():
-            return dict(weblab_poll_script=weblab_poll_script)
+            return dict(weblab_poll_script=weblab_poll_script, weblab_user=weblab_user)
 
         if hasattr(app, 'cli'):
             @self._app.cli.command('clean-expired-users')
