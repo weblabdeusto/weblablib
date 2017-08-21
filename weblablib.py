@@ -1510,6 +1510,12 @@ class InvalidConfigError(WebLabError, ValueError):
     """Invalid configuration"""
     pass
 
+class WebLabNotInitializedError(WebLabError):
+    pass
+
+class _NotFoundError(WebLabError, KeyError):
+    pass
+
 ######################################################################################
 #
 #
@@ -1687,7 +1693,7 @@ class _TaskRunner(threading.Thread):
 
 def _current_weblab():
     if 'weblab' not in current_app.extensions:
-        raise Exception("App not initialized with weblab.init_app()")
+        raise WebLabNotInitializedError("App not initialized with weblab.init_app()")
     return current_app.extensions['weblab']
 
 def _current_redis():
@@ -1821,8 +1827,6 @@ class _CleanerThread(threading.Thread):
                 if self._stopping:
                     break
 
-class _NotFoundError(Exception):
-    pass
 
 def _cleanup_all():
     all_threads = _CleanerThread._instances + _TaskRunner._instances

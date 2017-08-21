@@ -32,6 +32,13 @@ class StdWrap(object):
         sys.stdout = self.sysout
         sys.stderr = self.syserr
 
+class WithoutWebLabTest(unittest.TestCase):
+    def test_extension(self):
+        app = Flask(__name__)
+        with self.assertRaises(weblablib.WebLabNotInitializedError):
+            with app.app_context():
+                weblablib._current_weblab()
+
 class BaseWebLabTest(unittest.TestCase):
     def get_config(self):
         return {
@@ -54,6 +61,10 @@ class BaseWebLabTest(unittest.TestCase):
         self.auth_headers = {
             'Authorization': 'Basic ' + base64.encodestring(b'weblabdeusto:password').decode('utf8').strip(),
         }
+        self.wrong_auth_headers = {
+            'Authorization': 'Basic ' + base64.encodestring(b'wrong_weblabdeusto:wrong_password').decode('utf8').strip(),
+        }
+
         self.weblab.init_app(self.app)
         self.weblab._redis_manager.client.flushall()
 
@@ -129,6 +140,34 @@ class BaseWebLabTest(unittest.TestCase):
 
     def tearDown(self):
         self.weblab._cleanup()
+
+class WebLabApiTest(BaseWebLabTest):
+    def test_api(self):
+        with self.app.test_client() as client:
+            result = self.get_json(client.get('/weblab/sessions/api'))
+            self.assertEquals(result['api_version'], '1')
+
+    def test_weblab_test_without_auth(self):
+        with self.app.test_client() as client:
+            result = self.get_json(client.get('/weblab/sessions/test'))
+            self.assertEquals(result['valid'], False)
+            self.assertIn("no username", result['error_messages'][0])
+
+    def test_weblab_test_with_wrong_auth(self):
+        with self.app.test_client() as client:
+            result = self.get_json(client.get('/weblab/sessions/test', headers=self.wrong_auth_headers))
+            self.assertEquals(result['valid'], False)
+            self.assertIn("wrong username", result['error_messages'][0])
+
+    def test_weblab_test_with_right_auth(self):
+        with self.app.test_client() as client:
+            result = self.get_json(client.get('/weblab/sessions/test', headers=self.auth_headers))
+            self.assertEquals(result['valid'], True)
+
+    def test_weblab_status_with_wrong_auth(self):
+        with self.app.test_client() as client:
+            result = self.get_text(client.get('/weblab/sessions/<invalid>/status', headers=self.wrong_auth_headers))
+            self.assertIn("seem to be", result)
 
 class SimpleUnauthenticatedTest(BaseWebLabTest):
     def test_token(self):
