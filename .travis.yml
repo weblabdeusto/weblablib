@@ -11,6 +11,6 @@ install:
   - python setup.py install
   - pip install python-coveralls nose
 script:
-  coverage run --source=weblablib.py -m nose
+  coverage run --source=weblablib -m nose
 after_success:
   coveralls
