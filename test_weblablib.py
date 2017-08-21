@@ -1,10 +1,15 @@
 import os
+import sys
 import json
 import time
 import base64
 import datetime
 
 import six
+if six.PY2:
+    from StringIO import StringIO
+else:
+    from io import StringIO
 from flask import Flask, url_for, render_template_string, g, session
 import flask.cli as flask_cli
 
@@ -15,6 +20,17 @@ from click.testing import CliRunner
 
 os.environ['FLASK_APP'] = 'fake.py' # Overrided later
 cmp = lambda a, b: a.__cmp__(b)
+
+class StdWrap(object):
+    def __enter__(self):
+        self.sysout = sys.stdout
+        self.syserr = sys.stderr
+        self.fake_stdout = sys.stdout = StringIO()
+        self.fake_stderr = sys.stderr = StringIO()
+
+    def __exit__(self, *args, **kwargs):
+        sys.stdout = self.sysout
+        sys.stderr = self.syserr
 
 class BaseWebLabTest(unittest.TestCase):
     def get_config(self):
@@ -120,6 +136,21 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
         token2 = self.weblab.create_token()
         self.assertNotEquals(token1, token2)
 
+    def test_callback_initial_url(self):
+        self.weblab._initial_url = None
+        
+        with StdWrap():
+            with self.app.test_client() as client:
+                result = self.get_text(client.get('/mylab/callback/session.not.found'))
+
+        self.assertIn('ERROR', result)
+        self.assertIn('weblab.initial_url', result)
+
+    def test_callback(self):
+        with self.app.test_client() as client:
+            result = self.get_text(client.get('/mylab/callback/session.not.found'))
+            self.assertIn('forbidden', result)
+
     def test_anonymous(self):
         with self.app.test_client() as client:
             client.get('/lab/')
@@ -149,6 +180,25 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
          with self.app.test_client() as client:
             result = self.get_text(client.get('/lab/'))
             self.assertIn("Access forbidden", result)
+
+    def test_dispose_wrong_responses(self):
+        with self.app.test_client() as client:
+            request_data = {
+            }
+            rv = client.post('/weblab/sessions/{}'.format('foo'), data=json.dumps(request_data), headers=self.auth_headers)
+            self.assertIn("Unknown", self.get_json(rv)['message'])
+
+            request_data = {
+                'action': 'look at the mountains'
+            }
+            rv = client.post('/weblab/sessions/{}'.format('foo'), data=json.dumps(request_data), headers=self.auth_headers)
+            self.assertIn("Unknown", self.get_json(rv)['message'])
+
+            request_data = {
+                'action': 'delete'
+            }
+            rv = client.post('/weblab/sessions/{}'.format('does.not.exist'), data=json.dumps(request_data), headers=self.auth_headers)
+            self.assertIn("Not found", self.get_json(rv)['message'])
 
 class UnauthorizedLinkSimpleTest(BaseWebLabTest):
     def get_config(self):
@@ -232,10 +282,10 @@ class BaseSessionWebLabTest(BaseWebLabTest):
         request_data = {
             'action': 'delete',
         }
-        rv = self.weblab_client.post('/weblab/sessions/{}', data=json.dumps(request_data), headers=self.auth_headers)
+        rv = self.weblab_client.post('/weblab/sessions/{}'.format(session_id), data=json.dumps(request_data), headers=self.auth_headers)
         return self.get_json(rv)
 
-class SimpleTest(BaseSessionWebLabTest):
+class UserTest(BaseSessionWebLabTest):
 
     def lab(self):
         task = self.current_task.delay()
@@ -243,7 +293,9 @@ class SimpleTest(BaseSessionWebLabTest):
         weblablib.weblab_user.data['foo'] = 'bar'
 
         # And in any case build another
-        weblablib.weblab_user.data = {'foo': 'bar'}
+        if weblablib.weblab_user.active:
+            weblablib.weblab_user.data = {'foo': 'bar'}
+
         return render_template_string("@@task@@%s@@task@@{{ weblab_poll_script() }}" % task.task_id)
 
     def task(self):
@@ -301,6 +353,16 @@ class SimpleTest(BaseSessionWebLabTest):
         self.assertEquals(task1, task2)
         self.assertEquals(hash(task1), hash(task2))
         self.assertEquals(cmp(task1, task2), 0)
+        self.assertFalse(task1 < task2)
+        self.assertFalse(task2 < task1)
+
+        # sys.maxint/maxsize is the maximum integer. Any hash will be lower than that
+        # (except for if suddenly the random string is exactly maxint...)
+        if six.PY2:
+            self.assertTrue(task1 < sys.maxint)
+        else:
+            self.assertTrue(task1 < sys.maxsize)
+
         self.assertIn(task1.task_id, repr(task1))
         self.assertNotEquals(task1, task1.task_id)
         self.assertNotEquals(cmp(task1, task1.task_id), 0)
@@ -315,6 +377,15 @@ class SimpleTest(BaseSessionWebLabTest):
 
         self.status(session_id1)
         self.dispose(session_id1)
+        
+        self.client.get('/lab/')
+        self.assertFalse(weblablib.weblab_user.active)
+        self.assertFalse(weblablib.weblab_user.is_anonymous)
+        self.assertEquals(weblablib.weblab_user.time_left, 0)
+        self.assertEquals(weblablib.weblab_user.session_id, session_id1)
+        self.assertIn(session_id1, str(weblablib.weblab_user))
+        with self.assertRaises(NotImplementedError):
+            weblablib.weblab_user.data = {}
 
 class CLITest(BaseWebLabTest):
 
@@ -402,6 +473,35 @@ class WebLabSetupErrorsTest(unittest.TestCase):
             weblablib.WebLab().init_app(None)
 
         self.assertIn("Flask app", str(cm.exception))
+
+    def test_app_trailing_slashes(self):
+        app = Flask(__name__)
+        app.config.update({
+            'WEBLAB_CALLBACK_URL': '/mylab/callback/',
+            'WEBLAB_BASE_URL': '/mylab/',
+            'WEBLAB_USERNAME': 'weblabdeusto',
+            'WEBLAB_PASSWORD': 'password',
+            'SERVER_NAME': 'localhost:5000',
+        })
+        with StdWrap():
+            weblab = weblablib.WebLab(app)
+        weblab._cleanup()
+
+    def test_missing_server_name(self):
+        app = Flask(__name__)
+        app.config.update({
+            'WEBLAB_CALLBACK_URL': '/mylab/callback',
+            'WEBLAB_USERNAME': 'weblabdeusto',
+            'WEBLAB_PASSWORD': 'password',
+        })
+        with StdWrap():
+            sysargv = sys.argv
+            sys.argv = list(sys.argv) + [ 'fake-new-user']
+            try:
+                weblab = weblablib.WebLab(app)
+            finally:
+                sys.argv = sysargv
+        weblab._cleanup()
 
     def test_app_twice(self):
         app = Flask(__name__)
