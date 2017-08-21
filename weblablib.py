@@ -1621,8 +1621,17 @@ class WebLabTask(object):
             representation = representation.encode('utf8')
         return representation
 
+    def __lt__(self, other):
+        """Compare, for Python 3"""
+        if isinstance(other, WebLabTask):
+            return self._task_id < other._task_id
+
+        return hash(self) < hash(other)
+
     def __cmp__(self, other):
         """Compare it with other object"""
+        cmp = lambda a, b: (a > b) - (a < b)
+
         if isinstance(other, WebLabTask):
             return cmp(self._task_id, other._task_id)
 

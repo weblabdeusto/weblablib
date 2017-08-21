@@ -4,6 +4,7 @@ import time
 import base64
 import datetime
 
+import six
 from flask import Flask, url_for, render_template_string, g
 import flask.cli as flask_cli
 
@@ -13,6 +14,7 @@ from click.testing import CliRunner
 
 
 os.environ['FLASK_APP'] = 'fake.py' # Overrided later
+cmp = lambda a, b: a.__cmp__(b)
 
 class BaseWebLabTest(unittest.TestCase):
     def create_weblab(self):
