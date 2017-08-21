@@ -1,4 +1,7 @@
 from __future__ import unicode_literals, print_function, division
+
+import os
+import time
 from mylab import weblab, redis
 
 from weblablib import weblab_user
@@ -39,7 +42,7 @@ def start(client_data, server_data):
     print(" - Since this method is run *before* the user goes to the lab, you can't")
     print("   store information on Flask's 'session'. But you can store it on:")
     print("   weblab_user.data")
-    weblab_user.data = { 'local_identifier': os.urandom(32) }
+    weblab_user.data = { 'local_identifier': weblab.create_token() }
     print()
     print("************************************************************************")
 
@@ -57,19 +60,19 @@ def dispose():
     print(" - In this example, we'll 'empty' the microcontroller (in a database)")
     print()
     print("************************************************************************")
-    
+
     clean_resources()
 
 def clean_resources():
     """
-    This code could be in dispose(). However, since we want to call this low-level 
-    code from outside any request and we can't (since we're using 
+    This code could be in dispose(). However, since we want to call this low-level
+    code from outside any request and we can't (since we're using
     weblab_user.username in dispose())... we separate it. This way, this code can
     be called from outside using 'flask clean-resources'
     """
     redis.set('hardware:microcontroller', 'empty')
     print("Microcontroller restarted")
-    
+
 
 def switch_light(number, state):
     if state:

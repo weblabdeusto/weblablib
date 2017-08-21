@@ -1278,6 +1278,9 @@ class _RedisManager(object):
                 elif user.time_without_polling >= self.weblab.timeout:
                     expired_sessions.append(session_id)
 
+                elif user.exited:
+                    expired_sessions.append(session_id)
+
         return expired_sessions
 
     def session_exists(self, session_id, retrieve_expired=True):
@@ -1414,10 +1417,13 @@ class _RedisManager(object):
         pipeline.hget(key, 'result')
         pipeline.hget(key, 'running')
         pipeline.hget(key, 'name')
-        session_id, finished, error, result, running, name = pipeline.execute()
+        session_id, finished, error_str, result_str, running, name = pipeline.execute()
 
         if session_id is None:
             return None
+
+        error = json.loads(error_str)
+        result = json.loads(result_str)
 
         if not running:
             status = 'submitted'
@@ -1430,6 +1436,7 @@ class _RedisManager(object):
             status = 'running'
 
         return {
+            'task_id': task_id,
             'result': result,
             'error': error,
             'status': status,
@@ -1579,7 +1586,7 @@ class WebLabTask(object):
         """
         task_data = self._task_data
         if task_data:
-            return task_data['result']
+            return task_data['error']
 
     def __repr__(self):
         """Represent a WebLab task"""

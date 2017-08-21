@@ -1,9 +1,11 @@
+import time
+
 from flask import Blueprint, url_for, render_template, jsonify, session, current_app, request
 
 from mylab import weblab
 from mylab.hardware import program_device, is_light_on, get_microcontroller_state, switch_light, LIGHTS
 
-from weblablib import requires_active, requires_login, weblab_user
+from weblablib import requires_active, requires_login, weblab_user, logout
 
 main_blueprint = Blueprint('main', __name__)
 
@@ -32,7 +34,7 @@ def status():
     "Return the status of the board"
     lights = {}
     microcontroller = {}
-    
+
     for light in range(LIGHTS):
         lights['light-{}'.format(light + 1)] = is_light_on(light)
 
@@ -41,13 +43,21 @@ def status():
     task_id = session.get('programming_task')
     if task_id:
         task = weblab.get_task(task_id)
-        current_app.logger.debug("Current programming task status: ", task.status)
-        current_app.logger.debug("Current programming task result: ", task.result)
-        current_app.logger.debug("Current programming task error: ", task.error)
+        if task:
+            current_app.logger.debug("Current programming task status: %s (error: %s; result: %s)", task.status, task.error, task.result)
 
     return jsonify(error=False, lights=lights, microcontroller=microcontroller, time_left=weblab_user.time_left)
 
+@main_blueprint.route('/logout', methods=['POST'])
+@requires_login
+def logout_view():
+    if not _check_csrf():
+        return jsonify(error=True, message="Invalid JSON")
 
+    if weblab_user.active:
+        logout()
+
+    return jsonify(error=False)
 
 @main_blueprint.route('/lights/<int:number>', methods=['POST'])
 @requires_active
@@ -56,7 +66,6 @@ def light(number):
     internal_number = number - 1
 
     # Check that number is valid
-    print(internal_number)
     if internal_number not in range(LIGHTS):
         return jsonify(error=True, message="Invalid light number")
 
@@ -64,7 +73,7 @@ def light(number):
         return jsonify(error=True, message="Invalid CSRF")
 
     # Turn on light
-    switch_light(internal_number, request.values.get('state') or True)
+    switch_light(internal_number, request.values.get('state', 'false') == 'true')
     return status()
 
 
@@ -77,8 +86,8 @@ def microcontroller():
 
     code = request.values.get('code') or "code"
 
-    running_tasks = weblab.get_running_tasks()
-    if len(running_tasks):
+    # If there are running tasks, don't let them send the program
+    if len(weblab.running_tasks):
         return jsonify(error=True, message="Other tasks being run")
 
     task = program_device.delay(code)
@@ -99,9 +108,9 @@ def microcontroller():
 
 
 #######################################################
-# 
+#
 #   Other functions
-# 
+#
 
 def _check_csrf():
     expected = session.get('csrf')
@@ -114,5 +123,5 @@ def _check_csrf():
         # No CSRF passed.
         current_app.logger.warning("Missing CSRF in provided data")
         return False
-    
+
     return expected == obtained
