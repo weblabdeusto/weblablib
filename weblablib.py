@@ -307,6 +307,8 @@ class WebLab(object):
             poll()
             return jsonify(success=True)
 
+        self._app.after_request(_update_weblab_user_data)
+
         #
         # Add autopoll
         #
@@ -1090,7 +1092,7 @@ def _process_start_request(request_data):
                        last_poll=_current_timestamp(), max_date=float(_to_timestamp(max_date)),
                        username=server_initial_data['request.username'],
                        username_unique=server_initial_data['request.username.unique'],
-                       exited=False, data=None)
+                       exited=False, data={})
 
     redis_manager = _current_redis()
 
@@ -1112,6 +1114,7 @@ def _process_start_request(request_data):
             traceback.print_exc()
         else:
             redis_manager.update_data(session_id, data)
+            _update_weblab_user_data(None)
 
     link = url_for('weblab_callback_url', session_id=session_id, _external=True, **kwargs)
     return dict(url=link, session_id=session_id)
@@ -1186,15 +1189,21 @@ class _RedisManager(object):
         self.client.delete('{}:weblab:sessions:{}'.format(self.key_base, session_id))
 
     def update_data(self, session_id, data):
-        key = '{}:weblab:active:{}'.format(self.key_base, session_id)
+        key_active = '{}:weblab:active:{}'.format(self.key_base, session_id)
+        key_inactive = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
 
         pipeline = self.client.pipeline()
-        pipeline.hget(key, 'max_date')
-        pipeline.hset(key, 'data', json.dumps(data))
-        max_date, _ = pipeline.execute()
+        pipeline.hget(key_active, 'max_date')
+        pipeline.hget(key_inactive, 'max_date')
+        pipeline.hset(key_active, 'data', json.dumps(data))
+        pipeline.hset(key_inactive, 'data', json.dumps(data))
+        max_date_active, max_date_inactive, _, _ = pipeline.execute()
 
-        if max_date is None: # Object had been removed
-            self.client.delete(key)
+        if max_date_active is None: # Object had been removed
+            self.client.delete(key_active)
+
+        if max_date_inactive is None: # Object had been removed
+            self.client.delete(key_inactive)
 
     def get_user(self, session_id):
         pipeline = self.client.pipeline()
@@ -1691,6 +1700,24 @@ def _status_time(session_id):
     current_app.logger.debug("User {} still has {} seconds".format(user.username, user.time_left))
     return min(5, int(user.time_left))
 
+def _update_weblab_user_data(response):
+    # If a developer does:
+    #
+    # weblab_user.data["foo"] = "bar"
+    #
+    # Nothing is triggered in Redis. For this reason, after each request
+    # we check that the data has changed or not.
+    #
+    session_id = _current_session_id()
+    redis_manager = _current_redis()
+    if session_id:
+        if weblab_user.active:
+            current_user = redis_manager.get_user(session_id)
+            if json.dumps(current_user.data) != weblab_user.data:
+                redis_manager.update_data(session_id, weblab_user.data)
+
+    return response
+
 
 def _dispose_user(session_id, waiting):
     redis_manager = _current_redis()
@@ -1711,6 +1738,7 @@ def _dispose_user(session_id, waiting):
                     weblab._on_dispose()
                 except Exception:
                     traceback.print_exc()
+                _update_weblab_user_data(None)
 
             unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
             while unfinished_tasks:

@@ -9,13 +9,13 @@ class Config(object):
     #
     # export SECRET_KEY='something-fixed-but-random'
     #
-    # in the script where you run this code. This way, you will always have
-    # the same SECRET_KEY, and therefore the same session regardless
-    # server restarts.
+    # in the script where you run this code (for example, in wsgi_app.py).
+    # This way, you will always have the same SECRET_KEY, and therefore 
+    # the same session regardless server restarts.
     SECRET_KEY = os.environ.get('SECRET_KEY') or os.urandom(32)
 
     # You should also store these credentials somewhere safer, like in the
-    # same script as in the SECRET_KEY.
+    # same script as in the SECRET_KEY (in wsgi_app.py, not here)
     WEBLAB_USERNAME = os.environ.get('WEBLAB_USERNAME') or 'weblabdeusto'
     WEBLAB_PASSWORD = os.environ.get('WEBLAB_PASSWORD') or 'password'
 

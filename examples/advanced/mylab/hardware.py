@@ -42,7 +42,8 @@ def start(client_data, server_data):
     print(" - Since this method is run *before* the user goes to the lab, you can't")
     print("   store information on Flask's 'session'. But you can store it on:")
     print("   weblab_user.data")
-    weblab_user.data = { 'local_identifier': weblab.create_token() }
+    weblab_user.data['local_identifier'] = weblab.create_token()
+    print("   In this case: {}".format(weblab_user.data['local_identifier']))
     print()
     print("************************************************************************")
 
@@ -58,6 +59,7 @@ def dispose():
     print(" - Typically, here you clean up resources (stop motors, delete programs,")
     print("   etc.)")
     print(" - In this example, we'll 'empty' the microcontroller (in a database)")
+    print(" - Testing weblab_user.data: {}".format(weblab_user.data['local_identifier']))
     print()
     print("************************************************************************")
 
@@ -77,6 +79,7 @@ def clean_resources():
 def switch_light(number, state):
     if state:
         print("************************************************************************")
+        print("  User {} (local identifier: {})".format(weblab_user.username, weblab_user.data['local_identifier']))
         print("  Imagine that light {} is turning on!                                  ".format(number))
         print("************************************************************************")
         redis.set('hardware:lights:{}'.format(number), 'off')
