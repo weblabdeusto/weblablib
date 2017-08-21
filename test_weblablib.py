@@ -5,7 +5,7 @@ import base64
 import datetime
 
 import six
-from flask import Flask, url_for, render_template_string, g
+from flask import Flask, url_for, render_template_string, g, session
 import flask.cli as flask_cli
 
 import weblablib
@@ -17,12 +17,8 @@ os.environ['FLASK_APP'] = 'fake.py' # Overrided later
 cmp = lambda a, b: a.__cmp__(b)
 
 class BaseWebLabTest(unittest.TestCase):
-    def create_weblab(self):
-        self.weblab = weblablib.WebLab()
-        self.app = Flask(__name__)
-        flask_cli.locate_app = lambda *args: self.app
-        self.server_name = 'localhost:5000'
-        self.app.config.update({
+    def get_config(self):
+        return {
             'SECRET_KEY': 'super-secret',
             'WEBLAB_CALLBACK_URL': '/mylab/callback',
             'WEBLAB_USERNAME': 'weblabdeusto',
@@ -31,7 +27,14 @@ class BaseWebLabTest(unittest.TestCase):
             'WEBLAB_SCHEME': 'https',
             'WEBLAB_AUTOCLEAN_THREAD': False, # No thread
             'WEBLAB_TASK_THREADS_PROCESS': 0, # No thread
-        })
+        }
+
+    def create_weblab(self):
+        self.weblab = weblablib.WebLab()
+        self.app = Flask(__name__)
+        flask_cli.locate_app = lambda *args: self.app
+        self.server_name = 'localhost:5000'
+        self.app.config.update(self.get_config())
         self.auth_headers = {
             'Authorization': 'Basic ' + base64.encodestring(b'weblabdeusto:password').decode('utf8').strip(),
         }
@@ -111,11 +114,73 @@ class BaseWebLabTest(unittest.TestCase):
     def tearDown(self):
         self.weblab._cleanup()
 
-class VerySimpleTest(BaseWebLabTest):
+class SimpleUnauthenticatedTest(BaseWebLabTest):
     def test_token(self):
         token1 = self.weblab.create_token()
         token2 = self.weblab.create_token()
         self.assertNotEquals(token1, token2)
+
+    def test_anonymous(self):
+        with self.app.test_client() as client:
+            client.get('/lab/')
+            self.assertTrue(weblablib.weblab_user.is_anonymous)
+            self.assertFalse(weblablib.weblab_user.active)
+
+    def test_poll_url(self):
+        with self.app.test_client() as client:
+            client.get('/lab/')
+            url = url_for('weblab_poll_url', session_id='does.not.exist')
+            result = self.get_json(client.get(url))
+            self.assertIn("Different session", result['reason'])
+            
+            with client.session_transaction() as sess:
+                sess[self.weblab._session_id_name] = 'does.not.exist'
+
+            result = self.get_json(client.get(url))
+            self.assertIn("Not found", result['reason'])
+
+    def test_poll_script(self):
+        with self.app.test_client() as client:
+            client.get('/lab/')
+            result = render_template_string("{{ weblab_poll_script() }}")
+            self.assertIn('session_id not found', result)
+
+    def test_unauthorized(self):
+         with self.app.test_client() as client:
+            result = self.get_text(client.get('/lab/'))
+            self.assertIn("Access forbidden", result)
+
+class UnauthorizedLinkSimpleTest(BaseWebLabTest):
+    def get_config(self):
+        config = super(UnauthorizedLinkSimpleTest, self).get_config()
+        config['WEBLAB_UNAUTHORIZED_LINK'] = 'http://mylink'
+        return config
+
+    def test_unauthorized_link(self):
+         with self.app.test_client() as client:
+            rv = client.get('/lab/', follow_redirects=False)
+            self.assertEquals(rv.location, 'http://mylink')
+
+class UnauthorizedTemplateSimpleTest(BaseWebLabTest):
+    def get_config(self):
+        config = super(UnauthorizedTemplateSimpleTest, self).get_config()
+        config['WEBLAB_UNAUTHORIZED_TEMPLATE'] = 'mytemplate.html'
+        return config
+
+    def test_unauthorized_template(self):
+        def new_render_template(location):
+            return location
+
+        old_render_template = weblablib.render_template
+
+        with self.app.test_client() as client:
+            weblablib.render_template = new_render_template
+            try:
+                lab_result = self.get_text(client.get('/lab/'))
+            finally:
+                weblablib.render_template = old_render_template
+
+            self.assertEquals(lab_result, 'mytemplate.html')
 
 class BaseSessionWebLabTest(BaseWebLabTest):
     def setUp(self):
@@ -174,7 +239,11 @@ class SimpleTest(BaseSessionWebLabTest):
 
     def lab(self):
         task = self.current_task.delay()
+        # check that it's a dictionary
         weblablib.weblab_user.data['foo'] = 'bar'
+
+        # And in any case build another
+        weblablib.weblab_user.data = {'foo': 'bar'}
         return render_template_string("@@task@@%s@@task@@{{ weblab_poll_script() }}" % task.task_id)
 
     def task(self):
@@ -192,6 +261,9 @@ class SimpleTest(BaseSessionWebLabTest):
         # We call the relative_launch_url. It is redirected to the lab, which
         # starts a new task, which establishes that counter is zero
         response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+
+        self.assertEquals(weblablib.weblab_user.session_id, session_id1)
+
         task_id = response.split('@@task@@')[1]
 
         # There is one task, which is running
