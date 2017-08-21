@@ -3,7 +3,7 @@ import json
 import base64
 import datetime
 
-from flask import Flask
+from flask import Flask, url_for, render_template_string
 import flask.cli as flask_cli
 
 import weblablib
@@ -18,11 +18,13 @@ class BaseWebLabTest(unittest.TestCase):
         self.weblab = weblablib.WebLab()
         self.app = Flask(__name__)
         flask_cli.locate_app = lambda *args: self.app
+        self.server_name = 'localhost:5000'
         self.app.config.update({
+            'SECRET_KEY': 'super-secret',
             'WEBLAB_CALLBACK_URL': '/mylab/callback',
             'WEBLAB_USERNAME': 'weblabdeusto',
             'WEBLAB_PASSWORD': 'password',
-            'SERVER_NAME': 'localhost:5000',
+            'SERVER_NAME': self.server_name,
             'WEBLAB_SCHEME': 'https',
             'WEBLAB_AUTOCLEAN_THREAD': False, # No thread
             'WEBLAB_TASK_THREADS_PROCESS': 0, # No thread
@@ -41,6 +43,14 @@ class BaseWebLabTest(unittest.TestCase):
         def on_dispose():
             self.on_dispose()
 
+        @self.weblab.initial_url
+        def initial_url():
+            return url_for('lab')
+
+        @self.app.route('/lab/')
+        def lab():
+            return self.lab()
+
         @self.weblab.task()
         def task():
             self.task()
@@ -52,6 +62,9 @@ class BaseWebLabTest(unittest.TestCase):
 
     def on_dispose(self):
         pass
+
+    def lab(self):
+        return ":-)"
 
     def task(self):
         pass
@@ -65,6 +78,9 @@ class BaseWebLabTest(unittest.TestCase):
 class BaseSessionWebLabTest(BaseWebLabTest):
     def setUp(self):
         super(BaseSessionWebLabTest, self).setUp()
+        # self.weblab_client is stateless, sessionless
+        self.weblab_client = self.app.test_client()
+        # while self.client represents the user web browser
         self.client = self.app.test_client(use_cookies=True)
         self.client.__enter__()
 
@@ -88,7 +104,7 @@ class BaseSessionWebLabTest(BaseWebLabTest):
             },
             'back': back,
         }
-        rv = self.client.post('/weblab/sessions/', data=json.dumps(request_data), headers=self.auth_headers)
+        rv = self.weblab_client.post('/weblab/sessions/', data=json.dumps(request_data), headers=self.auth_headers)
         response = json.loads(rv.get_data(as_text=True))
         self.session_id = response['session_id']
         self.launch_url = response['url']
@@ -98,7 +114,7 @@ class BaseSessionWebLabTest(BaseWebLabTest):
         if session_id is None:
             session_id = self.session_id
 
-        rv = self.client.get('/weblab/sessions/{}/status'.format(session_id), headers=self.auth_headers)
+        rv = self.weblab_client.get('/weblab/sessions/{}/status'.format(session_id), headers=self.auth_headers)
         return json.loads(rv.get_data(as_text=True))
 
     def dispose(self, session_id = None):
@@ -108,12 +124,19 @@ class BaseSessionWebLabTest(BaseWebLabTest):
         request_data = {
             'action': 'delete',
         }
-        rv = self.client.post('/weblab/sessions/{}', data=json.dumps(request_data), headers=self.auth_headers)
+        rv = self.weblab_client.post('/weblab/sessions/{}', data=json.dumps(request_data), headers=self.auth_headers)
         return json.loads(rv.get_data(as_text=True))
 
 class SimpleTest(BaseSessionWebLabTest):
+    def lab(self):
+        return render_template_string("{{ weblab_poll_script() }}")
+
     def test_simple(self):
         self.new_user()
+
+        url = self.launch_url.split(self.server_name, 1)[1]
+        self.client.get(url, follow_redirects=True)
+
         self.status()
         self.dispose()
 
@@ -134,10 +157,28 @@ class CLITest(BaseWebLabTest):
             self.assertIn("Deleted", result.output)
             self.assertEquals(result.exit_code, 0)
 
+            result = runner.invoke(self.app.cli, ["fake-dispose"])
+            self.assertIn("Session not found", result.output)
+            self.assertEquals(result.exit_code, 0)
+
             result = runner.invoke(self.app.cli, ["fake-status"])
             self.assertIn("Session not found", result.output)
             self.assertEquals(result.exit_code, 0)
-    
+
+            result = runner.invoke(self.app.cli, ["fake-new-user"])
+            self.assertEquals(result.exit_code, 0)
+
+            request_data = {
+                'action': 'delete',
+            }
+            session_id_line = [ line for line in result.output.splitlines() if self.server_name in line ][0]
+            session_id = session_id_line.strip().split('/')[-1]
+            self.weblab._redis_manager._tests_delete_user(session_id)
+
+            result = runner.invoke(self.app.cli, ["fake-dispose"])
+            self.assertIn("Not found", result.output)
+            self.assertEquals(result.exit_code, 0)
+
     def test_other_cli(self):
         runner = CliRunner()
         

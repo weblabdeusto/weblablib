@@ -1243,6 +1243,11 @@ class _RedisManager(object):
 
         return AnonymousUser()
 
+    def _tests_delete_user(self, session_id):
+        "Only for testing"
+        self.client.delete('{}:weblab:active:{}'.format(self.key_base, session_id))
+        self.client.delete('{}:weblab:inactive:{}'.format(self.key_base, session_id))
+
     def delete_user(self, session_id, expired_user):
         if self.client.hget('{}:weblab:active:{}'.format(self.key_base, session_id), "max_date") is None:
             return False
