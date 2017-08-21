@@ -11,7 +11,7 @@ from config import config
 
 weblab = WebLab()
 toolbar = DebugToolbarExtension()
-redis = FlaskRedis()
+redis = FlaskRedis(decode_responses=True)
 
 def create_app(config_name):
     """
