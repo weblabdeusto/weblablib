@@ -280,7 +280,7 @@ class WebLab(object):
             self._callback_url = self._app.config.get(ConfigurationKeys.WEBLAB_CALLBACK_URL)
 
         if not self._callback_url:
-            raise ValueError("Invalid callback URL. Either provide it in the constructor or in the WEBLAB_CALLBACK_URL configuration")
+            raise InvalidConfigError("Invalid callback URL. Either provide it in the constructor or in the WEBLAB_CALLBACK_URL configuration")
         elif self._callback_url.endswith('/'):
             print("Note: your callback URL ({}) ends with '/'. It is discouraged".format(self._callback_url), file=sys.stderr)
 
@@ -336,7 +336,7 @@ class WebLab(object):
         #
         for key in 'WEBLAB_USERNAME', 'WEBLAB_PASSWORD':
             if key not in self._app.config:
-                raise ValueError("Invalid configuration. Missing {}".format(key))
+                raise InvalidConfigError("Invalid configuration. Missing {}".format(key))
 
         def weblab_poll_script():
             """
@@ -1491,6 +1491,10 @@ class WebLabError(Exception):
 class NoContextError(WebLabError):
     """Wraps the fact that it is attempting to call an object like
     session outside the proper scope."""
+    pass
+
+class InvalidConfigError(WebLabError, ValueError):
+    """Invalid configuration"""
     pass
 
 ######################################################################################

@@ -16,6 +16,10 @@ In the case of Python, with the popular [Flask](http://flask.pocoo.org) microfra
 
 If you are familiar with Flask and with Web development, and want to be able to customize everything but not need to implement all the layers of authentication, administration, etc., this library would be very useful. Furthermore, this library allows you to develop remote laboratories for many environments (from regular computers with Linux to systems such as Raspberry Pi).
 
+## Documentation
+
+Read the docs: https://weblablib.readthedocs.io
+
 ## Installation
 
 Simply use pip:
@@ -47,8 +51,4 @@ if __name__ == '__main__':
 ```
 
 See further examples in the ``examples`` directory.
-
-## Advance usage
-
-Read the docs: https://weblablib.readthedocs.io
 
