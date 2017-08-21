@@ -37,6 +37,7 @@ import json
 import time
 import atexit
 import base64
+import pickle
 import datetime
 import threading
 import traceback
@@ -224,20 +225,27 @@ class WebLab(object):
         """
         Initialize the app. This method MUST be called (unless 'app' is provided in the constructor of WebLab)
         """
-        if self._initialized:
-            # Clean
-            self._cleanup()
-
         if app is None:
             raise ValueError("app must be a Flask app")
 
+        if self._initialized:
+            if app != self._app:
+                raise ValueError("Error: app already initialized with a different app!")
+
+            if pickle.dumps(app.config) != self._app_config:
+                raise ValueError("Error: app previously called with different config!")
+
+            # Already initialized with the same app
+            return
+
         self._app = app
+        self._app_config = pickle.dumps(app.config)
 
         #
         # Register the extension
         #
         if 'weblab' in self._app.extensions:
-            print("Overriding existing WebLab extension (did you create two WebLab() ?)", file=sys.stderr)
+            raise ValueError("Error: another WebLab extension already installed in this app!")
 
         self._app.extensions['weblab'] = self
 
