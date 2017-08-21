@@ -28,7 +28,7 @@ class BaseWebLabTest(unittest.TestCase):
             'WEBLAB_TASK_THREADS_PROCESS': 0, # No thread
         })
         self.auth_headers = {
-            'Authorization': 'Basic ' + str(base64.encodestring(b'weblabdeusto:password')).strip(),
+            'Authorization': 'Basic ' + base64.encodestring(b'weblabdeusto:password').decode('utf8').strip(),
         }
         self.weblab.init_app(self.app)
         self.weblab._redis_manager.client.flushall()
@@ -89,7 +89,7 @@ class BaseSessionWebLabTest(BaseWebLabTest):
             'back': back,
         }
         rv = self.client.post('/weblab/sessions/', data=json.dumps(request_data), headers=self.auth_headers)
-        response = json.loads(rv.data)
+        response = json.loads(rv.get_data(as_text=True))
         self.session_id = response['session_id']
         self.launch_url = response['url']
         return response
@@ -99,7 +99,7 @@ class BaseSessionWebLabTest(BaseWebLabTest):
             session_id = self.session_id
 
         rv = self.client.get('/weblab/sessions/{}/status'.format(session_id), headers=self.auth_headers)
-        return json.loads(rv.data)
+        return json.loads(rv.get_data(as_text=True))
 
     def dispose(self, session_id = None):
         if session_id is None:
@@ -109,7 +109,7 @@ class BaseSessionWebLabTest(BaseWebLabTest):
             'action': 'delete',
         }
         rv = self.client.post('/weblab/sessions/{}', data=json.dumps(request_data), headers=self.auth_headers)
-        return json.loads(rv.data)
+        return json.loads(rv.get_data(as_text=True))
 
 class SimpleTest(BaseSessionWebLabTest):
     def test_simple(self):
