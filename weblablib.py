@@ -370,7 +370,7 @@ class WebLab(object):
 
         @self._app.context_processor
         def weblab_context_processor():
-            return dict(weblab_poll_script=weblab_poll_script, weblab_user=weblab_user)
+            return dict(weblab_poll_script=weblab_poll_script, weblab_user=weblab_user, weblab=self)
 
         if hasattr(app, 'cli'):
             @self._app.cli.command('clean-expired-users')
@@ -668,6 +668,44 @@ class WebLab(object):
             return wrapper
 
         return task_wrapper
+
+    def get_task(self, task_id):
+        """
+        Given a task of the current user, return the WebLabTask object
+        """
+        task_data = self._redis_manager.get_task(task_id)
+        if task_data:
+            # Don't return tasks of other users
+            if task_data['session_id'] == _current_session_id():
+                return WebLabTask(self, task_data['task_id'])
+
+    @property
+    def tasks(self):
+        """
+        Return all the tasks created in the current session (completed or not)
+        """
+        session_id = _current_session_id()
+        tasks = []
+        for task_id in self._redis_manager.get_all_tasks(session_id):
+            tasks.append(WebLabTask(self, task_id))
+        return tasks
+
+    @property
+    def running_tasks(self):
+        """
+        Check which tasks are still running and return them.
+        """
+        session_id = _current_session_id()
+        tasks = []
+        for task_id in self._redis_manager.get_unfinished_tasks(session_id):
+            tasks.append(WebLabTask(self, task_id))
+        return tasks
+
+    def create_token(self): # pylint: disable=no-self-use
+        """
+        Create a URL-safe random unique token in a safe way.
+        """
+        return _create_token()
 
 ##################################################################################################################
 #
@@ -1379,7 +1417,8 @@ class _RedisManager(object):
         pipeline.hget(key, 'error')
         pipeline.hget(key, 'result')
         pipeline.hget(key, 'running')
-        session_id, finished, error, result, running = pipeline.execute()
+        pipeline.hget(key, 'name')
+        session_id, finished, error, result, running, name = pipeline.execute()
 
         if session_id is None:
             return None
@@ -1399,7 +1438,11 @@ class _RedisManager(object):
             'error': error,
             'status': status,
             'session_id': session_id,
+            'name': name,
         }
+
+    def get_all_tasks(self, session_id):
+        return self.client.smembers('{}:weblab:{}:tasks'.format(self.key_base, session_id))
 
     def get_unfinished_tasks(self, session_id):
         task_ids = self.client.smembers('{}:weblab:{}:tasks'.format(self.key_base, session_id))
@@ -1446,17 +1489,30 @@ class _TaskWrapper(object):
         return WebLabTask(self._weblab, task_id)
 
 class WebLabTask(object):
+    """
+    WebLab-Task. You can create it by defining a task as in:
+
+    @weblab.task()
+    def my_task(arg1, arg2):
+        return arg1 + arg2
+
+    And then running it:
+
+    task = my_task.delay(5, 10)
+    print(task.task_id)
+
+    Another option is to obtain it:
+
+    task = weblab.get_task(task_id)
+
+    Or simply:
+
+    tasks = weblab.get_tasks()
+    """
     def __init__(self, weblab, task_id):
         self._weblab = weblab
         self._redis_manager = weblab._redis_manager
         self._task_id = task_id
-
-    @property
-    def id(self):
-        """
-        Returns the task identifier.
-        """
-        return self._task_id
 
     @property
     def task_id(self):
@@ -1474,6 +1530,12 @@ class WebLabTask(object):
         task_data = self._task_data
         if task_data:
             return task_data['session_id']
+
+    @property
+    def name(self):
+        task_data = self._task_data
+        if task_data:
+            return task_data['name']
 
     @property
     def status(self):
@@ -1510,8 +1572,23 @@ class WebLabTask(object):
             return task_data['result']
 
     def __repr__(self):
+        """Represent a WebLab task"""
         return '<WebLab Task {}>'.format(self._task_id).encode('utf8')
 
+    def __cmp__(self, other):
+        """Compare it with other object"""
+        if isinstance(other, WebLabTask):
+            return cmp(self._task_id, other._task_id)
+
+        return cmp(hash(self), hash(other))
+
+    def __eq__(self, other):
+        """Is it equal to other object?"""
+        return isinstance(other, WebLabTask) and self._task_id == other._task_id
+
+    def __hash__(self):
+        """Calculate the hash of this task"""
+        return hash(('weblabtask:', self._task_id))
 
 class _TaskRunner(threading.Thread):
 

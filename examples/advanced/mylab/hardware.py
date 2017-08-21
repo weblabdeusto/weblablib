@@ -99,6 +99,13 @@ def program_device(code):
     print("you can start, and it will be running in a different thread. In this ")
     print("case, this is lasting for 10 seconds from now ")
     print("************************************************************************")
+    if redis.get('hardware:microcontroller') == 'programming':
+        # Just in case two programs are sent at the very same time
+        return {
+            'success': False,
+            'reason': "Already programming"
+        }
+
     redis.set('hardware:microcontroller', 'programming')
     for x in range(10):
         time.sleep(1)
