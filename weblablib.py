@@ -1616,7 +1616,10 @@ class WebLabTask(object):
 
     def __repr__(self):
         """Represent a WebLab task"""
-        return '<WebLab Task {}>'.format(self._task_id).encode('utf8')
+        representation = '<WebLab Task {}>'.format(self._task_id)
+        if six.PY2:
+            representation = representation.encode('utf8')
+        return representation
 
     def __cmp__(self, other):
         """Compare it with other object"""

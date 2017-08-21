@@ -1,9 +1,10 @@
 import os
 import json
+import time
 import base64
 import datetime
 
-from flask import Flask, url_for, render_template_string
+from flask import Flask, url_for, render_template_string, g
 import flask.cli as flask_cli
 
 import weblablib
@@ -72,7 +73,7 @@ class BaseWebLabTest(unittest.TestCase):
 
         @self.weblab.task()
         def task():
-            self.task()
+            return self.task()
 
         with self.assertRaises(ValueError) as cm:
             @self.weblab.task()
@@ -83,6 +84,12 @@ class BaseWebLabTest(unittest.TestCase):
            
 
         self.current_task = task
+
+    def get_json(self, rv):
+        return json.loads(rv.get_data(as_text=True))
+
+    def get_text(self, rv):
+        return rv.get_data(as_text=True)
 
     def on_start(self, client_data, server_data):
         pass
@@ -138,17 +145,18 @@ class BaseSessionWebLabTest(BaseWebLabTest):
             'back': back,
         }
         rv = self.weblab_client.post('/weblab/sessions/', data=json.dumps(request_data), headers=self.auth_headers)
-        response = json.loads(rv.get_data(as_text=True))
+        response = self.get_json(rv)
         self.session_id = response['session_id']
-        self.launch_url = response['url']
-        return response
+        launch_url = response['url']
+        relative_launch_url = launch_url.split(self.server_name, 1)[1]
+        return launch_url, self.session_id
     
     def status(self, session_id = None):
         if session_id is None:
             session_id = self.session_id
 
         rv = self.weblab_client.get('/weblab/sessions/{}/status'.format(session_id), headers=self.auth_headers)
-        return json.loads(rv.get_data(as_text=True))
+        return self.get_json(rv)
 
     def dispose(self, session_id = None):
         if session_id is None:
@@ -158,36 +166,81 @@ class BaseSessionWebLabTest(BaseWebLabTest):
             'action': 'delete',
         }
         rv = self.weblab_client.post('/weblab/sessions/{}', data=json.dumps(request_data), headers=self.auth_headers)
-        return json.loads(rv.get_data(as_text=True))
+        return self.get_json(rv)
 
 class SimpleTest(BaseSessionWebLabTest):
+
     def lab(self):
-        self.current_task.delay()
-        return render_template_string("{{ weblab_poll_script() }}")
+        task = self.current_task.delay()
+        weblablib.weblab_user.data['foo'] = 'bar'
+        return render_template_string("@@task@@%s@@task@@{{ weblab_poll_script() }}" % task.task_id)
 
     def task(self):
         self.counter += 1
-        return None
+        time.sleep(0.2)
+        return [ self.counter, weblablib.weblab_user.data['foo'] ]
 
     def test_simple(self):
-        self.new_user()
+        # New user 
+        launch_url1, session_id1 = self.new_user()
 
-        url = self.launch_url.split(self.server_name, 1)[1]
-
+        # counter is zero
         self.counter = 0
-        self.client.get(url, follow_redirects=True)
+        
+        # We call the relative_launch_url. It is redirected to the lab, which
+        # starts a new task, which establishes that counter is zero
+        response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+        task_id = response.split('@@task@@')[1]
+
+        # There is one task, which is running
         self.assertEquals(len(self.weblab.tasks), 1)
         self.assertEquals(len(self.weblab.running_tasks), 1)
+
+        task1 = self.weblab.get_task(task_id)
+        self.assertIsNotNone(task1)
+        self.assertEquals(task1.name, 'task')
+        self.assertEquals(task1.status, 'submitted')
+        self.assertEquals(task1.session_id, session_id1)
+        self.assertIsNone(task1.result)
+        self.assertIsNone(task1.error)
+
+        # But the counter is still zero
+        self.assertEquals(self.counter, 0)
+
+        # Run the tasks
         self.weblab.run_tasks()
-        self.assertEquals(len(self.weblab.tasks), 1)
-        self.assertEquals(len(self.weblab.running_tasks), 0)
+
+        # The task has been run
         self.assertEquals(self.counter, 1)
 
+        # There is still 1 task in this session, but no running task
+        self.assertEquals(len(self.weblab.tasks), 1)
+        self.assertEquals(len(self.weblab.running_tasks), 0)
+        
+        # Let's retrieve the task again
+        task2 = self.weblab.get_task(task_id)
+        self.assertEquals(task2.status, 'done')
+        self.assertIsNone(task2.error)
+        self.assertEquals(task2.result, [1, 'bar'])
+
+        # And let's see how it's the same task as before
+        self.assertEquals(task1, task2)
+        self.assertEquals(hash(task1), hash(task2))
+        self.assertEquals(cmp(task1, task2), 0)
+        self.assertIn(task1.task_id, repr(task1))
+        self.assertNotEquals(task1, task1.task_id)
+        self.assertNotEquals(cmp(task1, task1.task_id), 0)
+
+        # Cool!
+
+        self.client.get(url_for('weblab_poll_url', session_id=session_id1))
         self.client.get('/poll')
         self.client.get('/logout')
 
-        self.status()
-        self.dispose()
+        self.weblab.clean_expired_users()
+
+        self.status(session_id1)
+        self.dispose(session_id1)
 
 class CLITest(BaseWebLabTest):
 
