@@ -9,7 +9,7 @@ python:
   - 3.6
 install:
   - python setup.py install
-  - pip install coveralls nose
+  - pip install python-coveralls nose
 script:
   coverage run --source=weblablib.py -m nose
 after_success:
