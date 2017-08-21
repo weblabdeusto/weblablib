@@ -398,9 +398,12 @@ class UserTest(BaseSessionWebLabTest):
         # sys.maxint/maxsize is the maximum integer. Any hash will be lower than that
         # (except for if suddenly the random string is exactly maxint...)
         if six.PY2:
-            self.assertTrue(task1 < sys.maxint)
-        else:
-            self.assertTrue(task1 < sys.maxsize)
+            maxvalue = sys.maxint
+            self.assertTrue(task1 < maxvalue)
+
+        # In python 3 it's quite difficult to find the largest hashable value
+        # ( sys.hash_info.modulus - 1 is the largest number where hash(n) == n, but 
+        # for many other hash(x) > hash(2 ^ 61 - 1))
 
         self.assertIn(task1.task_id, repr(task1))
         self.assertNotEquals(task1, task1.task_id)
