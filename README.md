@@ -1,5 +1,8 @@
 # weblablib
 
+[![build status](https://travis-ci.org/weblabdeusto/weblablib.svg?branch=master)](https://travis-ci.org/weblabdeusto/weblablib)
+[![coverage](https://coveralls.io/repos/github/weblabdeusto/weblablib/badge.svg?branch=master)](https://coveralls.io/github/weblabdeusto/weblablib?branch=master)
+
 **weblablib** is a library for creating [WebLab-Deusto](https://github.com/weblabdeusto/weblabdeusto/) remote laboratories.
 
 A remote laboratory is a software and hardware system that enables students to access real laboratories through the Internet.
