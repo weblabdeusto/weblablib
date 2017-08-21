@@ -2,10 +2,118 @@
 
 {% block body %}
     {{ super() }}
-    :-)
+    
+    <div class="container">
+        <div class="row">
+            <h1>Welcome to <strong>mylab</strong>!</h1>
+        </div>
+        <br>
+
+        {#
+            If the user refreshes the website AFTER the time...
+        #}
+        {% if not weblab_user.active %}
+            <div class="row">
+                <div class="alert alert-danger col-md-6 col-md-offset-3">
+                    <div class="text-center">
+                        <h3>Your session is expired</h3>
+                    </div>
+
+                    <p>However, given that in <tt>views.py</tt> the view <tt>index</tt> is using <tt>@requires_login</tt> instead of <tt>@requires_active</tt>, the user can still access the lab</p>
+                    <br>
+                    <div class="text-center">
+                        <a class="btn btn-danger" href="{{ weblab_user.back }}">Go back</a>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+
+
+        <div class="row">
+            <p>This is just an example laboratory using <a href="https://weblablib.readthedocs.org">weblablib</a>. Imagine that we have 10 lights and a microcontroller with some code that interacts with them. Here we can turn on and off the lights and send programs to the microcontroller.</p>
+            <p>Time: <span id="timer"></span>.
+        </div>
+        <br><br>
+
+        <div id="panel" class="row">
+            {% for light in range(1, 11) %}
+            <div class="col-sm-1 text-center">
+                Light {{ light }}
+                <br>
+                <a href="javascript:turnOff({{ light }})"><img width="50px" id="light_{{ light }}_on" src="https://openclipart.org/download/116581/bulb-on.svg"></a>
+                <a href="javascript:turnOn({{ light }})"><img width="50px" class="hidden" id="light_{{ light }}_off" src="https://openclipart.org/download/110269/1296215547.svg"></a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
 {% endblock %}
 
 {% block scripts %}
     {# This comes by default from weblablib, while it requires to have JQuery previously imported #}
     {{ weblab_poll_script() }}
+
+    <script>
+        var CSRF = {{ session['csrf']|tojson }};
+
+        var currentTime = Math.round({{ weblab_user.time_left }});
+        var running = currentTime > 0;
+
+        function updateTime () {
+            currentTime = currentTime - 1;
+            if (currentTime > 0) {
+                // Still time
+                if (currentTime > 1)
+                    $("#timer").text(currentTime + " seconds");
+                else
+                    $("#timer").text(currentTime + " second");
+            } else {
+                $("#panel").hide();
+                // No more time
+                $("#timer").text("Time is over!");
+                running = false;
+                currentTime = 0;
+                clearInterval(STATUS_INTERVAL);
+                clearInterval(TIMER_INTERVAL);
+            }
+        }
+
+        updateTime();
+
+        function turnOn(number) {
+            turnLight(number, true);
+            return false;
+        }
+
+        function turnOff(number) {
+            turnLight(number, false);
+            return false;
+        }
+
+        function turnLight(number, state) {
+            $.post("{{ url_for('.light', number=12345) }}".replace("12345", number), {
+                csrf: CSRF,
+                state: state
+            }).done(parseStatus);
+        }
+
+        function parseStatus(newStatus) {
+            for (var i = 1; i < 11; i++) {
+                if(newStatus["light-" + i]) {
+                    $("#light_" + i + "_on").hide();
+                    $("#light_" + i + "_off").show();
+                } else {
+                    $("#light_" + i + "_off").hide();
+                    $("#light_" + i + "_on").show();
+                }
+            }
+        }
+
+        var STATUS_INTERVAL = setInterval(function () {
+            $.get("{{ url_for('.status') }}").done(parseStatus);
+        }, 1000);
+        var TIMER_INTERVAL = setInterval(updateTime, 1000);
+
+        $.get("{{ url_for('.status') }}").done(parseStatus);
+    </script>
 {% endblock %}

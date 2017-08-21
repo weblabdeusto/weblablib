@@ -62,7 +62,7 @@ def on_stop():
     print(weblab_user)
 
 @app.route('/lab/')
-@requires_active()
+@requires_active
 def lab():
     """
     This is your code. If you provide @requires_active to any other URL, it is secured.

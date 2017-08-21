@@ -50,7 +50,8 @@ import click
 
 from werkzeug import LocalProxy
 from flask import Blueprint, Response, jsonify, request, current_app, redirect, \
-     url_for, g, session, after_this_request, render_template, Markup
+     url_for, g, session, after_this_request, render_template, Markup, \
+     has_request_context
 
 __all__ = ['WebLab',
            'logout', 'poll',
@@ -150,8 +151,6 @@ class ConfigurationKeys(object):
     # You can either call "flask run-tasks" or rely on the threads created
     # for running threads.
     WEBLAB_TASK_THREADS_PROCESS = 'WEBLAB_TASK_THREADS_PROCESS'
-
-
 
 #############################################################
 #
@@ -511,6 +510,9 @@ class WebLab(object):
         """
         if hasattr(g, 'session_id'):
             return g.session_id
+
+        if not has_request_context():
+            raise NoContextError("Error: you're trying to access the session (e.g., for the WebLab session id) outside a Flask request (like a Flask command, a thread or so)")
 
         return session.get(self._session_id_name)
 
@@ -955,40 +957,34 @@ def _set_weblab_user_cache(user):
 
 weblab_user = LocalProxy(_weblab_user) # pylint: disable=invalid-name
 
-def requires_login(redirect_back=True, current_only=False):
+def requires_login(func):
     """
     Decorator. Requires the user to be logged in (and be a current user or not).
-
-    @redirect_back: if it's a expired user, automatically redirect him to the original link
-    @current_only: if it's a expired_user and redirect_back is False, then act as if he was
-      an invalid user
     """
-    def requires_login_decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if not weblab_user.active:
-                if weblab_user.is_anonymous:
-                    # If anonymous user: forbidden
-                    return _current_weblab()._forbidden_handler()
-                elif redirect_back:
-                    # If expired user found, and redirect_back is the policy, return the user
-                    return redirect(weblab_user.back)
-                elif current_only:
-                    # If it requires a current user
-                    return _current_weblab()._forbidden_handler()
-                # If the policy is not returning back neither requiring that
-                # this is a current user... let it be
-            return func(*args, **kwargs)
-        return wrapper
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not weblab_user.active:
+            if weblab_user.is_anonymous:
+                # If anonymous user: forbidden
+                return _current_weblab()._forbidden_handler()
+            # Otherwise: if expired, just let it go
+        return func(*args, **kwargs)
+    return wrapper
 
-    return requires_login_decorator
-
-def requires_active(redirect_back=True):
+def requires_active(func):
     """
     Decorator. Requires the user to be a valid current user.
-    Otherwise, it will call the forbidden behavior.
     """
-    return requires_login(redirect_back=redirect_back, current_only=True)
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not weblab_user.active:
+            if weblab_user.is_anonymous:
+                # If anonymous user: forbidden
+                return _current_weblab()._forbidden_handler()
+            # If expired: send back to the original URL
+            return redirect(weblab_user.back)
+        return func(*args, **kwargs)
+    return wrapper
 
 def logout():
     """
@@ -1466,6 +1462,20 @@ class _RedisManager(object):
             pipeline.delete('{}:weblab:tasks:{}'.format(self.key_base, task_id))
             pipeline.delete('{}:weblab:task_ids:{}'.format(self.key_base, task_id))
         pipeline.execute()
+
+#####################################################################################
+#
+#   Exceptions
+#
+
+class WebLabError(Exception):
+    """Wraps weblab exceptions"""
+    pass
+
+class NoContextError(WebLabError):
+    """Wraps the fact that it is attempting to call an object like
+    session outside the proper scope."""
+    pass
 
 ######################################################################################
 #

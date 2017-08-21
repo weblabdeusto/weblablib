@@ -1,9 +1,9 @@
-from flask import Blueprint, url_for, render_template, jsonify, session, current_app
+from flask import Blueprint, url_for, render_template, jsonify, session, current_app, request
 
 from mylab import weblab
 from mylab.hardware import program_device, is_light_on, get_microcontroller_state, switch_light, LIGHTS
 
-from weblablib import requires_active
+from weblablib import requires_active, requires_login, weblab_user
 
 main_blueprint = Blueprint('main', __name__)
 
@@ -17,7 +17,7 @@ def initial_url():
 
 
 @main_blueprint.route('/')
-@requires_active()
+@requires_login
 def index():
     # This method generates a random identifier and stores it in Flask's session object
     # For any request coming from the client, we'll check it. This way, we avoid
@@ -26,17 +26,15 @@ def index():
 
     return render_template("index.html")
 
-
-
 @main_blueprint.route('/status')
-@requires_active()
+@requires_active
 def status():
     "Return the status of the board"
     lights = {}
     microcontroller = {}
     
     for light in range(LIGHTS):
-        lights['light-{}'.format(light)] = is_light_on(light)
+        lights['light-{}'.format(light + 1)] = is_light_on(light)
 
     microcontroller = get_microcontroller_state()
 
@@ -54,16 +52,19 @@ def status():
 @main_blueprint.route('/lights/<int:number>', methods=['POST'])
 @requires_active
 def light(number):
+    # light number is 1..10
+    internal_number = number - 1
+
     # Check that number is valid
-    if number in range(LIGHTS):
+    print(internal_number)
+    if internal_number not in range(LIGHTS):
         return jsonify(error=True, message="Invalid light number")
 
-    request_data, error_message = _get_request_data()
-    if error_message:
-        return error_message
+    if not _check_csrf():
+        return jsonify(error=True, message="Invalid CSRF")
 
     # Turn on light
-    switch_light(number, request_data.get('state'))
+    switch_light(internal_number, request.values.get('state') or True)
     return status()
 
 
@@ -71,11 +72,10 @@ def light(number):
 @main_blueprint.route('/microcontroller', methods=['POST'])
 @requires_active
 def microcontroller():
-    request_data, error_message = _get_request_data()
-    if error_message:
-        return error_message
+    if not _check_csrf():
+        return jsonify(error=True, message="Invalid CSRF")
 
-    code = request_data.get('code')
+    code = request.values.get('code') or "code"
 
     running_tasks = weblab.get_running_tasks()
     if len(running_tasks):
@@ -103,32 +103,13 @@ def microcontroller():
 #   Other functions
 # 
 
-def _get_request_data():
-    """
-    Get JSON data. If it's invalid or not a dict, return an error. 
-    Then check CSRF. If invalid, return an error. Otherwise, return the data.
-
-    The response is (data, error_message). If error_message is None, it's fine.
-    """
-    request_data = request.get_json(force=True, silent=True)
-    if not request_data:
-        return None, jsonify(error=True, message="Invalid POST data (no JSON?)")
-
-    if not isinstance(request_data, dict):
-        return None, jsonify(error=True, message="Expected dictionary")
-
-    if not _check_csrf(request_data):
-        return None, jsonify(error=True, message="Invalid CSRF")
-
-    return request_data, None
-
-def _check_csrf(request_data):
+def _check_csrf():
     expected = session.get('csrf')
     if not expected:
         current_app.logger.warning("No CSRF in session. Calling method before loading index?")
         return False
 
-    obtained = request_data.get('csrf')
+    obtained = request.values.get('csrf')
     if not obtained:
         # No CSRF passed.
         current_app.logger.warning("Missing CSRF in provided data")

@@ -57,8 +57,19 @@ def dispose():
     print(" - In this example, we'll 'empty' the microcontroller (in a database)")
     print()
     print("************************************************************************")
+    
+    clean_resources()
 
+def clean_resources():
+    """
+    This code could be in dispose(). However, since we want to call this low-level 
+    code from outside any request and we can't (since we're using 
+    weblab_user.username in dispose())... we separate it. This way, this code can
+    be called from outside using 'flask clean-resources'
+    """
     redis.set('hardware:microcontroller', 'empty')
+    print("Microcontroller restarted")
+    
 
 def switch_light(number, state):
     if state:

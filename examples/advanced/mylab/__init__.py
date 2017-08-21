@@ -33,23 +33,24 @@ def create_app(config_name):
     from .views import main_blueprint
     app.register_blueprint(main_blueprint)
 
-    from .hardware import dispose
+    from .hardware import clean_resources
 
-    @app.cli.command('dispose')
-    def dispose_command():
+    @app.cli.command('clean-resources')
+    def clean_resources_command():
         """
         You can now run:
-        $ flask dispose
+        $ flask clean-resources
 
-        And it will call the dispose method. Imagine that you have a resource
-        which is telling a motor to move against a wall, and suddenly the
-        computer where this code runs is restarted (due to an external factor).
-        You want that the server, as soon as it starts, stops that procedure.
+        And it will call the clean_resources method. Imagine that you have a 
+        resource which is telling a motor to move against a wall, and suddenly 
+        the computer where this code runs is restarted (due to an external 
+        factor). You want that the server, as soon as it starts, stops that 
+        procedure.
 
-        Doing this, in the launching script you can call "flask dispose" so 
-        every time you run the lab, first it stops any ongoing action.
+        Doing this, in the launching script you can call "flask clean-resoures" 
+        so every time you run the lab, first it stops any ongoing action.
         """
-        dispose()
+        clean_resources()
 
     # app is a valid Flask app
     return app

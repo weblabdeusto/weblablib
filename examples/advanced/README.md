@@ -38,6 +38,14 @@ So as to run it, in Linux / Mac OS X:
 
 ```
 
+Alternatively, you can do also:
+```shell
+ $ . localrc
+ $ flask run
+```
+
+Since ``localrc`` already contains those variables.
+
 In Microsoft Windows:
 ```shell
  C:\...\> set FLASK_DEBUG=1 # If developing
@@ -49,7 +57,7 @@ And you can test it using [WebLab-Deusto](https://weblabdeusto.readthedocs.org) 
 
 ```shell
 
- $ export FLASK_APP=autoapp.py
+ $ export FLASK_APP=autoapp.py # (or . localrc)
  $ flask fake-new-user --open-browser
 ```
 
