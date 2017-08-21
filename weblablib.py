@@ -1709,7 +1709,6 @@ def _status_time(session_id):
     if user.time_left <= 0:
         return -1
 
-    current_app.logger.debug("User {} still has {} seconds".format(user.username, user.time_left))
     return min(5, int(user.time_left))
 
 def _update_weblab_user_data(response):

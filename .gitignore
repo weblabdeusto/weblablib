@@ -1,3 +1,4 @@
+run-tests.sh
 .fake_weblab_user_session_id
 *.swp
 *.swo
