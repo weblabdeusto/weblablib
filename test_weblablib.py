@@ -48,12 +48,39 @@ class BaseWebLabTest(unittest.TestCase):
             return url_for('lab')
 
         @self.app.route('/lab/')
+        @weblablib.requires_login
         def lab():
             return self.lab()
+
+        @self.app.route('/lab/active')
+        @weblablib.requires_active
+        def lab_active():
+            return self.lab()
+
+        @self.app.route('/logout')
+        @weblablib.requires_active
+        def logout():
+            weblablib.logout()
+            return "logout"
+
+        @self.app.route('/poll')
+        @weblablib.requires_active
+        def poll():
+            weblablib.poll()
+            weblablib.poll() # Twice so as to test g.poll_requested
+            return "poll"
 
         @self.weblab.task()
         def task():
             self.task()
+
+        with self.assertRaises(ValueError) as cm:
+            @self.weblab.task()
+            def task():
+                self.task()
+
+        self.assertIn("same name", str(cm.exception))
+           
 
         self.current_task = task
 
@@ -74,6 +101,12 @@ class BaseWebLabTest(unittest.TestCase):
 
     def tearDown(self):
         self.weblab._cleanup()
+
+class VerySimpleTest(BaseWebLabTest):
+    def test_token(self):
+        token1 = self.weblab.create_token()
+        token2 = self.weblab.create_token()
+        self.assertNotEquals(token1, token2)
 
 class BaseSessionWebLabTest(BaseWebLabTest):
     def setUp(self):
@@ -129,13 +162,29 @@ class BaseSessionWebLabTest(BaseWebLabTest):
 
 class SimpleTest(BaseSessionWebLabTest):
     def lab(self):
+        self.current_task.delay()
         return render_template_string("{{ weblab_poll_script() }}")
+
+    def task(self):
+        self.counter += 1
+        return None
 
     def test_simple(self):
         self.new_user()
 
         url = self.launch_url.split(self.server_name, 1)[1]
+
+        self.counter = 0
         self.client.get(url, follow_redirects=True)
+        self.assertEquals(len(self.weblab.tasks), 1)
+        self.assertEquals(len(self.weblab.running_tasks), 1)
+        self.weblab.run_tasks()
+        self.assertEquals(len(self.weblab.tasks), 1)
+        self.assertEquals(len(self.weblab.running_tasks), 0)
+        self.assertEquals(self.counter, 1)
+
+        self.client.get('/poll')
+        self.client.get('/logout')
 
         self.status()
         self.dispose()
@@ -289,6 +338,7 @@ class WebLabSetupErrorsTest(unittest.TestCase):
             weblab.init_app(app)
 
         self.assertIn('different config', str(cm.exception))
+        weblablib._cleanup_all()
         weblab._cleanup()
 
     def _create_weblab(self):

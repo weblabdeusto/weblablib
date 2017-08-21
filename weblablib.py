@@ -1812,8 +1812,7 @@ class _CleanerThread(threading.Thread):
 class _NotFoundError(Exception):
     pass
 
-@atexit.register
-def _on_exit():
+def _cleanup_all():
     all_threads = _CleanerThread._instances + _TaskRunner._instances
 
     for instance in all_threads:
@@ -1821,3 +1820,7 @@ def _on_exit():
 
     for instance in all_threads:
         instance.join()
+
+@atexit.register
+def _on_exit():
+    _cleanup_all()
