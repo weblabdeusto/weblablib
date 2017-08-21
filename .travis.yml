@@ -2,8 +2,8 @@ language: python
 services:
   - redis
 os:
-  - windows
-  - osx
+#  - windows
+#  - osx
   - linux
 python:
   - 2.7
