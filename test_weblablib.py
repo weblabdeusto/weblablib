@@ -175,6 +175,10 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
         token2 = self.weblab.create_token()
         self.assertNotEquals(token1, token2)
 
+    def test_task_not_found(self):
+        task = self.weblab.get_task("does.not.exist")
+        self.assertIsNone(task)
+
     def test_callback_initial_url(self):
         self.weblab._initial_url = None
         
@@ -195,6 +199,11 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
             client.get('/lab/')
             self.assertTrue(weblablib.weblab_user.is_anonymous)
             self.assertFalse(weblablib.weblab_user.active)
+
+    def test_anonymous_on_active(self):
+        with self.app.test_client() as client:
+            rv = client.get('/lab/active')
+            self.assertIn("forbidden", self.get_text(rv))
 
     def test_poll_url(self):
         with self.app.test_client() as client:
@@ -339,7 +348,6 @@ class UserTest(BaseSessionWebLabTest):
 
     def task(self):
         self.counter += 1
-        time.sleep(0.2)
         return [ self.counter, weblablib.weblab_user.data['foo'] ]
 
     def test_simple(self):
@@ -419,6 +427,9 @@ class UserTest(BaseSessionWebLabTest):
 
         self.status(session_id1)
         self.dispose(session_id1)
+
+        rv = self.client.get('/lab/active')
+        self.assertEquals(rv.location, 'http://weblab.deusto.es')
         
         self.client.get('/lab/')
         self.assertFalse(weblablib.weblab_user.active)
@@ -428,6 +439,44 @@ class UserTest(BaseSessionWebLabTest):
         self.assertIn(session_id1, str(weblablib.weblab_user))
         with self.assertRaises(NotImplementedError):
             weblablib.weblab_user.data = {}
+
+class TaskFail(BaseSessionWebLabTest):
+
+    def lab(self):
+        task = self.current_task.delay()
+        return str(task.task_id)
+
+    def task(self):
+        10 / 0
+        return -1
+
+    def test_task_fail(self):
+        # New user 
+        launch_url1, session_id1 = self.new_user()
+
+        # counter is zero
+        self.counter = 0
+        
+        # We call the relative_launch_url. It is redirected to the lab, which
+        # starts a new task, which establishes that counter is zero
+        response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+
+        task_id = response
+
+        task = self.weblab.get_task(response)
+        self.assertEquals(task.status, 'submitted')
+        
+        with StdWrap():
+            self.weblab.run_tasks()
+
+        self.assertEquals(task.status, 'failed')
+        self.assertIsNone(task.result)
+        self.assertIsNotNone(task.error)
+        self.assertEqual(task.error['code'], 'exception')
+        self.assertIn('zero', task.error['message'])
+        self.assertEqual(task.error['class'], 'ZeroDivisionError')
+
+
 
 class CLITest(BaseWebLabTest):
 

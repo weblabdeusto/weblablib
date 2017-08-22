@@ -1305,12 +1305,9 @@ class _RedisManager(object):
 
         return expired_sessions
 
-    def session_exists(self, session_id, retrieve_expired=True):
+    def session_exists(self, session_id):
         user = self.get_user(session_id)
-        if retrieve_expired:
-            return not user.is_anonymous
-
-        return user.active
+        return not user.is_anonymous
 
     def poll(self, session_id):
         key = '{}:weblab:active:{}'.format(self.key_base, session_id)
