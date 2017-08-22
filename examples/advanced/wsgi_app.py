@@ -1,13 +1,18 @@
 import os
 import sys
+import six
 
 MYLAB_DIR = os.path.abspath(os.path.dirname(__file__))
 
 sys.path.insert(0, MYLAB_DIR)
 os.chdir(MYLAB_DIR)
 
-sys.stdout = open('stdout.txt', 'w', 0)
-sys.stderr = open('stderr.txt', 'w', 0)
+if six.PY2:
+    sys.stdout = open('stdout.txt', 'w', 0)
+    sys.stderr = open('stderr.txt', 'w', 0)
+else:
+    sys.stdout = open('stdout.txt', 'w')
+    sys.stderr = open('stderr.txt', 'w')
 
 #
 # XXX Change these values here XXX
