@@ -229,7 +229,7 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
             result = self.get_text(client.get('/lab/'))
             self.assertIn("Access forbidden", result)
 
-    def test_dispose_wrong_responses(self):
+    def test_dispose_wrong_requests(self):
         with self.app.test_client() as client:
             request_data = {
             }
@@ -280,6 +280,9 @@ class UnauthorizedTemplateSimpleTest(BaseWebLabTest):
 
             self.assertEquals(lab_result, 'mytemplate.html')
 
+class TestNewUserError(Exception):
+    pass
+
 class BaseSessionWebLabTest(BaseWebLabTest):
     def setUp(self):
         super(BaseSessionWebLabTest, self).setUp()
@@ -311,10 +314,13 @@ class BaseSessionWebLabTest(BaseWebLabTest):
         }
         rv = self.weblab_client.post('/weblab/sessions/', data=json.dumps(request_data), headers=self.auth_headers)
         response = self.get_json(rv)
-        self.session_id = response['session_id']
-        launch_url = response['url']
-        relative_launch_url = launch_url.split(self.server_name, 1)[1]
-        return launch_url, self.session_id
+        if 'session_id' in response:
+            self.session_id = response['session_id']
+            launch_url = response['url']
+            relative_launch_url = launch_url.split(self.server_name, 1)[1]
+            return launch_url, self.session_id
+        raise TestNewUserError(response['message'])
+
     
     def status(self, session_id = None):
         if session_id is None:
@@ -440,7 +446,53 @@ class UserTest(BaseSessionWebLabTest):
         with self.assertRaises(NotImplementedError):
             weblablib.weblab_user.data = {}
 
-class TaskFail(BaseSessionWebLabTest):
+    def test_status_concrete_time_left(self):
+        # New user, with 3 seconds
+        launch_url1, session_id1 = self.new_user(assigned_time=3)
+        
+        should_finish = self.status()['should_finish']
+
+        # Ask in 2..3 seconds (not 5)
+        self.assertTrue(2 <= should_finish <= 3)
+
+    def test_status_exited(self):
+        # New user, with 3 seconds
+        launch_url1, session_id1 = self.new_user(assigned_time=3)
+
+        self.client.get(launch_url1, follow_redirects=True)
+        self.client.get('/logout')
+        
+        should_finish = self.status()['should_finish']
+
+        # Logged out
+        self.assertEquals(should_finish, -1)
+
+    def test_status_time_left_passed(self):
+        # New user, with 3 seconds
+        launch_url1, session_id1 = self.new_user(assigned_time=0.1)
+
+        self.client.get(launch_url1, follow_redirects=True)
+        time.sleep(0.2)
+        
+        should_finish = self.status()['should_finish']
+
+        # time passed
+        self.assertEquals(should_finish, -1)
+
+    def test_status_timeout(self):
+        # New user, with 3 seconds
+        self.weblab.timeout = 0.1
+        launch_url1, session_id1 = self.new_user()
+
+        self.client.get(launch_url1, follow_redirects=True)
+        time.sleep(0.2)
+        
+        should_finish = self.status()['should_finish']
+
+        # time passed
+        self.assertEquals(should_finish, -1)
+
+class TaskFailTest(BaseSessionWebLabTest):
 
     def lab(self):
         task = self.current_task.delay()
@@ -476,7 +528,41 @@ class TaskFail(BaseSessionWebLabTest):
         self.assertIn('zero', task.error['message'])
         self.assertEqual(task.error['class'], 'ZeroDivisionError')
 
+class DisposeErrorTest(BaseSessionWebLabTest):
 
+    def lab(self):
+        return ":-)"
+
+    def on_dispose(self):
+        raise Exception("Testing error in the dispose method")
+
+    def test_task_fail(self):
+        # New user 
+        launch_url1, session_id1 = self.new_user()
+        
+        with StdWrap():
+            self.dispose()
+
+class StartErrorTest(BaseSessionWebLabTest):
+
+    def lab(self):
+        return ":-)"
+
+    def on_start(self, client_data, server_data):
+        raise Exception("Testing error in the start method")
+
+    def test_task_fail(self):
+        old_dispose_user = weblablib._dispose_user
+        def new_dispose_user(*args, **kwargs):
+            raise Exception("weird error")
+
+        weblablib._dispose_user = new_dispose_user
+        try:
+            with self.assertRaises(TestNewUserError):
+                with StdWrap():
+                    self.new_user()
+        finally:
+            weblablib._dispose_user = old_dispose_user
 
 class CLITest(BaseWebLabTest):
 

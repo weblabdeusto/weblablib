@@ -1118,8 +1118,16 @@ def _process_start_request(request_data):
         weblab._set_session_id(session_id)
         try:
             data = weblab._on_start(client_initial_data, server_initial_data)
-        except Exception:
+        except Exception as e:
             traceback.print_exc()
+            current_app.logger.warning("Error calling _on_start: {}".format(e), exc_info=True)
+            try:
+                _dispose_user(session_id, waiting=True)
+            except Exception as e2:
+                traceback.print_exc()
+                current_app.logger.warning("Error calling _on_dispose after _on_start failed: {}".format(e2), exc_info=True)
+
+            return dict(error=True, message="Error initializing laboratory")
         else:
             redis_manager.update_data(session_id, data)
             _update_weblab_user_data(None)
