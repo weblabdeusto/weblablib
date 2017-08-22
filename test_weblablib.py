@@ -506,11 +506,6 @@ class TaskFailTest(BaseSessionWebLabTest):
         # New user 
         launch_url1, session_id1 = self.new_user()
 
-        # counter is zero
-        self.counter = 0
-        
-        # We call the relative_launch_url. It is redirected to the lab, which
-        # starts a new task, which establishes that counter is zero
         response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
 
         task_id = response
@@ -527,6 +522,44 @@ class TaskFailTest(BaseSessionWebLabTest):
         self.assertEqual(task.error['code'], 'exception')
         self.assertIn('zero', task.error['message'])
         self.assertEqual(task.error['class'], 'ZeroDivisionError')
+
+class LongTaskTest(BaseSessionWebLabTest):
+
+    def get_config(self):
+        config = super(LongTaskTest, self).get_config()
+        config['WEBLAB_AUTOCLEAN_THREAD'] = True
+        config['WEBLAB_TASK_THREADS_PROCESS'] = 3
+        return config
+
+    def lab(self):
+        task = self.current_task.delay()
+        return str(task.task_id)
+
+    def task(self):
+        time.sleep(0.6)
+        return 0
+
+    def test_long_task(self):
+        self.weblab.cleaner_thread_interval = 0.1
+        launch_url1, session_id1 = self.new_user()
+        response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+        task_id = response
+        
+        max_time = 3
+        t0 = time.time()
+        while True:
+            task = self.weblab.get_task(task_id)
+            if task.status == 'running':
+                break
+            self.assertEquals(task.status, 'submitted')
+            time.sleep(0.03)
+
+            if time.time() - t0 > max_time:
+                self.fail("Too long checking for a submitted thread")
+
+        self.client.get('/logout')
+        time.sleep(0.2) # So other thread calls clean
+        self.dispose()
 
 class DisposeErrorTest(BaseSessionWebLabTest):
 
@@ -611,6 +644,18 @@ class CLITest(BaseWebLabTest):
 
         result = runner.invoke(self.app.cli, ["run-tasks"])
         self.assertEquals(result.exit_code, 0)
+
+class CLIFailTest(BaseWebLabTest):
+    def on_start(self, client_data, server_data):
+        raise Exception("Error initializing laboratory")
+
+    def test_cli_error(self):
+
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(self.app.cli, ["fake-new-user"])
+            self.assertIn("Error processing", result.output)
 
 class WebLabConfigErrorsTest(unittest.TestCase):
 

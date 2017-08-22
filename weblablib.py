@@ -187,6 +187,7 @@ class WebLab(object):
         self._callback_url = callback_url
         self._redis_client = None
 
+        self.cleaner_thread_interval = 5
         self.timeout = 15 # Will be overrided by the init_app method
         self._initial_url = None
         self._session_id_name = 'weblab_session_id' # overrided by WEBLAB_SESSION_ID_NAME
@@ -433,21 +434,26 @@ class WebLab(object):
                 }
 
                 result = _process_start_request(request_data)
-                print()
-                print("Congratulations! The session is started")
-                print()
-                print("Open: {}".format(result['url']))
-                if not open_browser:
-                    print(" (Next time, you can use --open-browser to automatically open the session in your web browser)")
-                print()
-                print("Session identifier: {}\n".format(result['session_id']))
-                open(".fake_weblab_user_session_id", 'w').write(result['session_id'])
-                print("Now you can make calls as if you were WebLab-Deusto (no argument needed):")
-                print(" - flask fake-status")
-                print(" - flask fake-dispose")
-                print()
-                if open_browser:
-                    webbrowser.open(result['url'])
+                if 'url' in result:
+                    print()
+                    print("Congratulations! The session is started")
+                    print()
+                    print("Open: {}".format(result['url']))
+                    if not open_browser:
+                        print(" (Next time, you can use --open-browser to automatically open the session in your web browser)")
+                    print()
+                    print("Session identifier: {}\n".format(result['session_id']))
+                    open(".fake_weblab_user_session_id", 'w').write(result['session_id'])
+                    print("Now you can make calls as if you were WebLab-Deusto (no argument needed):")
+                    print(" - flask fake-status")
+                    print(" - flask fake-dispose")
+                    print()
+                    if open_browser:
+                        webbrowser.open(result['url'])
+                else:
+                    print()
+                    print("Error processing request: {}".format(result['message']))
+                    print()
 
             @self._app.cli.command('fake-status')
             def fake_status():
@@ -1193,8 +1199,8 @@ class _RedisManager(object):
         pipeline.hset(key, 'data', json.dumps(user.data))
         pipeline.hset(key, 'back', user.back)
         pipeline.hset(key, 'exited', json.dumps(user.exited))
-        pipeline.set('{}:weblab:sessions:{}'.format(self.key_base, session_id), time.time())
         pipeline.expire(key, expiration)
+        pipeline.set('{}:weblab:sessions:{}'.format(self.key_base, session_id), time.time())
         pipeline.expire('{}:weblab:sessions:{}'.format(self.key_base, session_id), expiration + 300)
         pipeline.execute()
 
@@ -1827,8 +1833,12 @@ class _CleanerThread(threading.Thread):
             except Exception:
                 traceback.print_exc()
 
-            for _ in six.moves.range(100):
+            t0 = time.time()
+            while True:
                 time.sleep(0.05)
+                if time.time() -  t0 > self.weblab.cleaner_thread_interval:
+                    break
+
                 if self._stopping:
                     break
 
