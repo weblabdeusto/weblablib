@@ -635,7 +635,7 @@ class WebLab(object):
                 self._redis_manager.finish_task(task_id, error={
                     'code': 'exception',
                     'class': type(error).__name__,
-                    'message': unicode(error),
+                    'message': '{}'.format(error),
                 })
             else:
                 self._redis_manager.finish_task(task_id, result=result)
