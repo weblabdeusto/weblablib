@@ -19,6 +19,11 @@ If you are familiar with Flask and with Web development, and want to be able to 
 .. toctree::
    :maxdepth: 2
 
+   quickstart
+   development
+   advanced
+   example
+   configuration
 
 
 Indices and tables
