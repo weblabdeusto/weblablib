@@ -436,8 +436,68 @@ However, this code is very far from being usable as a remote laboratory:
 
 For all these things, you can either implement and test everything by yourself, or rely on a remote
 laboratory management system, such as `WebLab-Deusto <https://weblabdeusto.readthedocs.org/>`_. Most
-of those features are covered there, while, if you're using **weblablib**, some must be covered by
-you and **weblablib** is a helper library to do so.
+of those features (administration, analytics, scheduling) are covered by WebLab-Deusto, but at some
+point WebLab-Deusto delegates on the particular laboratories by sending them users. So for example a
+user will be authenticated in WebLab-Deusto, and attempt to access the laboratory, and still
+WebLab-Deusto will be dealing with the queue of users. When the user finally has permission to use
+the laboratory in that particular time, then WebLab-Deusto contacts the laboratory telling it in a
+secure way "I'm WebLab-Deusto, I have this particular student, get ready for it". 
 
-For example, the administrator will manage permissions in WebLab-Deusto.
+The laboratory still has to implement this protocol and life cycle. And here is where **weblablib**
+enters, by implementing the protocol and making it easy for laboratory developers to focus on the
+laboratory.
+
+To do so, you have to create a ``WebLab`` instance and initialize it with the Flask app. You can 
+either do both at once:
+
+.. code-block:: python
+
+   from weblablib import WebLab
+
+   weblab = WebLab(app)
+
+or do it in two phases:
+
+.. code-block:: python
+
+   from weblablib import WebLab
+
+   weblab = WebLab()
+
+   # Later
+
+   weblab.init_app(app)
+
+What is important is that the configuration is loaded in Flask *before* ``init_app`` (or ``WebLab(app)``).
+
+Additionally, ``weblablib`` has more interesting features. For example, you may want to establish that a
+particular Flask view is only available for WebLab users:
+
+.. code-block:: python
+
+   from weblablib import requires_login, requires_active
+
+   @app.route('/')
+   @requires_login
+   def index():
+       # ...
+
+   @app.route('/status')
+   @requires_active
+   def status():
+       # ...
+
+   @app.route('/lights/<number>/')
+   @requires_active
+   def light(number):
+       # ...
+
+In this case, you are defining that the view ``status`` and ``light`` can only be accessed by active WebLab
+users (users who have been assigned and whose time in the laboratory is not over); while the ``index`` view.
+
+
+
+# init_app
+# POLLING
+# LOGOUT
 
