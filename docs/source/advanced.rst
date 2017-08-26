@@ -87,6 +87,38 @@ user will be assigned until the task is finished. So make sure that your task en
 so as to not consume time of other users, and avoid starting tasks when the
 ``weblab_user.time_left`` is too short.
 
+Multiple laboratories in the same server
+----------------------------------------
+
+If you are running multiple laboratories in the same server, you should configure a different ``WEBLAB_REDIS_BASE`` value and/or ``WEBLAB_REDIS_URL``. **weblablib** relies on Redis to store the current status of the users and the laboratory, so if you run both in the default database with the default redis base name, there might be conflicts.
+
+To avoid this, either you use a different database (by default in Redis there are 16 databases, so you can use ``redis://localhost:6379/1`` or ``redis://localhost:6379/2``), or you can use the same one but using ``WEBLAB_REDIS_BASE`` different (e.g., ``lab1`` and ``lab2`` ). This would be recommended so later if you need to debug what is in Redis you can clearly see that there are values starting by ``lab1:`` or by ``lab2:`` refering to one or the other.
+
+Multiple laboratories through the same server
+---------------------------------------------
+
+If you have 3 Raspberry Pi with different laboratories running, and, at the same time, you have
+a single server that proxies requests to all, you may face session problems. To avoid this, please
+rely on the Flask session configuration variables, such as:
+
+.. tabularcolumns:: |p{6.5cm}|p{8.5cm}|
+
+================================= =========================================
+``SESSION_COOKIE_NAME``           The name of the cookie. By default it's
+                                  ``session``, so it's better to change it
+                                  in each laboratory to ``lab1sess`` and
+                                  ``lab2sess`` or similar.
+``SESSION_COOKIE_PATH``           The path of the cookie. By default the 
+                                  session cookie is stored in ``/``, but 
+                                  this way you can make sure that if you put
+                                  ``/lab1``, when the user goes to ``/lab2``,
+                                  no problem will arise.
+``SECRET_KEY``                    It is also recommendable that each lab have
+                                  a different key. If everything else fails,
+                                  at least the session created by other 
+                                  laboratory will not affect to the present
+                                  one.
+================================= =========================================
 
 Forbidden page
 --------------
