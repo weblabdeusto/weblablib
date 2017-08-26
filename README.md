@@ -33,21 +33,37 @@ Simply use pip:
 ## Simple usage
 
 ```python
-
-from flask import Flask
-from weblablib import WebLab, weblab_user
+from flask import Flask, url_for
+from weblablib import WebLab, weblab_user, requires_active
 
 app = Flask(__name__)
+app.config.update({
+    'SECRET_KEY': 'secret', # MUST CHANGE
+    'WEBLAB_CALLBACK_URL': '/callback',
+    'WEBLAB_USERNAME': 'weblabdeusto',
+    'WEBLAB_PASSWORD': 'password',
+})
 
 weblab = WebLab(app)
 
 @weblab.on_start
 def on_start(client_data, server_data):
     # ...
+    print("Starting user")
 
 @weblab.on_dispose
 def on_dispose():
     # ...
+    print("Ending user")
+
+@weblab.initial_url
+def initial_url():
+    return url_for('index')
+
+@app.route('/')
+@requires_active
+def index():
+    return "Hello, {}".format(weblab_user.username)
 
 if __name__ == '__main__':
     app.run(debug=True)
