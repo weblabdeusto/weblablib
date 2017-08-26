@@ -79,7 +79,7 @@ Creating a dummy Flask app
 .. note::
 
    If you already have certain experience with `Flask <http://flask.pocoo.org/>`_, you can get the code in
-   the ``examples/quickstart/step1`` `in the GitHub repository <https://github.com/weblabdeusto/weblablib>`_,
+   the `examples/quickstart/step1 <https://github.com/weblabdeusto/weblablib/tree/master/examples/quickstart/step1>`_ `in the GitHub repository <https://github.com/weblabdeusto/weblablib>`_,
    and then continue to :ref:`quickstart_adding_weblablib`.
 
 The next step is to create some basic code to create the web interface. We are
@@ -391,15 +391,15 @@ Under the ``Here we will...``, you must place the following code:
 
 .. code-block:: html
 
-        <!-- Here we will have the scripts -->
-        <script>
-            var STATUS_URL = "{{ url_for('status') }}";
-            var LIGHT_URL = "{{ url_for('light', number='LIGHT') }}";
-        </script>
-        <script src="{{ url_for('static', filename='lab.js') }}"></script>
+     <!-- Here we will have the scripts -->
+     <script>
+       var STATUS_URL = "{{ url_for('status') }}";
+       var LIGHT_URL = "{{ url_for('light', number='LIGHT') }}";
+     </script>
+     <script src="{{ url_for('static', filename='lab.js') }}"></script>
 
-      </body>
-    </html>
+    </body>
+   </html>
 
 ``url_for`` is the way Flask provides to point to URLs without having to hardcode them.
 If where it says ``@app.route('/status')`` tomorrow you change the URL, all the code will
@@ -417,6 +417,9 @@ be updated, as long as the name of the function is the same.
 
 Adding weblablib
 ----------------
+
+Why using weblablib
+~~~~~~~~~~~~~~~~~~~
 
 As you've seen in the previous example, you have a very simple website that does something
 with certain hardware (faked in ``hardware.py``). It works quite well: you turn a light
@@ -441,13 +444,23 @@ point WebLab-Deusto delegates on the particular laboratories by sending them use
 user will be authenticated in WebLab-Deusto, and attempt to access the laboratory, and still
 WebLab-Deusto will be dealing with the queue of users. When the user finally has permission to use
 the laboratory in that particular time, then WebLab-Deusto contacts the laboratory telling it in a
-secure way "I'm WebLab-Deusto, I have this particular student, get ready for it". 
+secure way "I'm WebLab-Deusto, I have this particular student, get ready for it".
 
 The laboratory still has to implement this protocol and life cycle. And here is where **weblablib**
 enters, by implementing the protocol and making it easy for laboratory developers to focus on the
 laboratory.
 
-To do so, you have to create a ``WebLab`` instance and initialize it with the Flask app. You can 
+.. note::
+
+   You can download the code of this section in the github repository, folder `examples/quickstart/step2 <https://github.com/weblabdeusto/weblablib/tree/master/examples/quickstart/step2>`_.
+
+   Note that in it, we have also included some time-related code in the JavaScript file.
+
+
+Adding WebLab
+~~~~~~~~~~~~~
+
+To use **weblablib**, you have to create a ``WebLab`` instance and initialize it with the Flask app. You can
 either do both at once:
 
 .. code-block:: python
@@ -475,10 +488,10 @@ particular Flask view is only available for WebLab users:
 
 .. code-block:: python
 
-   from weblablib import requires_login, requires_active
+   from weblablib import requires_active
 
    @app.route('/')
-   @requires_login
+   @requires_active
    def index():
        # ...
 
@@ -492,12 +505,493 @@ particular Flask view is only available for WebLab users:
    def light(number):
        # ...
 
-In this case, you are defining that the view ``status`` and ``light`` can only be accessed by active WebLab
-users (users who have been assigned and whose time in the laboratory is not over); while the ``index`` view.
+In this case, you are defining that the three views ``status`` and ``light`` can only be accessed by
+active WebLab users (users who have been assigned and whose time in the laboratory is not over).
+
+Additionally, we need to tell WebLab-Deusto what is the landing page when an experiment has been reserved,
+and we do it by adding the following code:
+
+.. code-block:: python
+
+   from flask import url_for
+
+   @weblab.initial_url
+   def initial_url():
+       # Being 'index' the name of the
+       # view ("def index():") where the
+       # user has to land
+       return url_for('index')
+
+This way, WebLab-Deusto will be managing students and the queue of students, and whenever it's time to
+access the laboratory, it will contact the laboratory, create a session for the user, initialize it in the
+user browser, and redirect the user to that (the one defined in ``initial_url``).
+
+Polling
+~~~~~~~
+
+In WebLab-Deusto the administrator has assigned a time for the students. Let's imagine that it's
+10 minutes per user. Typically, students leave earlier than the assigned time. For example, if they're
+learning how to write code for a robot, they might see that the robot has already failed in 30 seconds and
+might not need to continue suing it. However, if it works, they might need to stay 3 minutes or so. And if
+the lesson is a very complex one, then they might need the 10 minutes.
+
+For this reason, you might need to keep track of when is the user using the laboratory, and whenever the
+student leaves, report WebLab-Deusto that the user left. With **weblablib**, this process is almost
+automatic: you have to call a ``poll`` function in less than 15 seconds (or whatever you setup in
+the ``WEBLAB_TIMEOUT`` configuration). There are different ways to achieve this. The simplest is adding
+``weblab_poll_script`` in your template file as follows:
+
+.. code-block:: html
+
+        <!-- Here we will have the scripts -->
+        <script>
+            var STATUS_URL = "{{ url_for('status') }}";
+            var LIGHT_URL = "{{ url_for('light', number='LIGHT') }}";
+        </script>
+        <script src="{{ url_for('static', filename='lab.js') }}"></script>
+
+        {{ weblab_poll_script() }}
+
+      </body>
+    </html>
+
+Internally, it will create a JavaScript script that will call a ``poll`` method every few seconds. The only
+important thing is that this is called AFTER including ``jQuery`` since it relies on ``jQuery``.
+
+This way, whenever the student leaves the laboratory (actively, or because there was a network issue on his
+side, or for any other reason), the laboratory marks him as logged out, and therefore WebLab-Deusto assigns
+the laboratory to someone else.
+
+However, if you want to make this process faster, you can implement a method such as:
+
+.. code-block:: python
+
+   from weblablib import logout
+
+   @app.route('/logout')
+   @requires_active
+   def logout_view():
+       logout()
+       return jsonify(result="ok")
+
+This way, you can create in HTML a code that actively tells in a faster way to WebLab-Deusto that the user
+is finished. You can also call this automatically when the web browser closes with some JavaScript code like:
+
+.. code-block:: javascript
+
+   $(document).ready(function()
+   {
+       $(window).bind("beforeunload", function() {
+           $.get("{{ url_for('logout') }}");
+       });
+   });
+
+Additionally, by default, **weblablib** installs a code that for any call in your Flask app, it will call
+automatically ``poll``. You can disable this by configuring ``WEBLAB_AUTOPOLL`` to ``False`` in the
+configuration, and then call ``poll`` manually:
+
+.. code-block:: python
+
+   from weblablib import poll
+
+   @app.route('/poll')
+   @requires_active
+   def poll():
+       poll()
+       return jsonify(result='ok')
+
+Checking user data
+~~~~~~~~~~~~~~~~~~
+
+In **weblablib** there is an special object called ``weblab_user``. It is never ``None``, and it can be either:
+
+ * ``AnonymousUser``: when someone who has never been logged in (or not in a long time) accesses your app.
+ * ``CurrentUser``: when a user has been assigned to use the laboratory, and only during that time (and if the
+   user does not log out, or stopped polling)
+ * ``ExpiredUser``: when a user has been previuosly assigned, but the assigned time elapsed, or the user clicked
+   on log out or stopped polling.
+
+So as to distinguish the type of user, you have two properties:
+
+ * ``is_anonymous``: ``True`` if it's an ``AnonymousUser``
+ * ``active``: ``True`` if it's an ``CurrentUser``.
+
+Additionally, both the ``CurrentUser`` and the ``ExpiredUser`` have the following properties:
+
+ * ``username``: the username in the original system. For example, ``tom``. Note that this is not unique: if your WebLab-Deusto is sharing the laboratory with a Moodle, there might be a ``tom`` in WebLab-Deusto and another ``tom`` in Moodle, and in both cases ``weblab_user.username`` will be ``tom``. So you can use it to talk to the username, but not for saving information for this user.
+ * ``username_unique``: a full, unique, identifier of the user. For example, ``tom@school1@labsland``. Compared to the previous version, this is guaranteed to be unique.
+ * ``back``: this is the URL where the user should go *after* finishing using the laboratory. For example, if the student was in a Moodle system, the ``back`` will be a link to the particular page in that Moodle system. ``requires_active`` by default redirects the user to that URL when the user has been logged in and not anymore.
+ * ``time_left``: this is the time, in seconds, to finish the session. If the user was assigned 10 minutes, and 2 minutes have been passed, it will return something like ``478.3`` (seconds). Take into account that for this number to be accurate, both the laboatory server and the WebLab-Deusto server must have the same date and time, so use any time synchronization tool (e.g., a ntp server) to make sure this is the case.
+ * ``data``: this is some data that you can store for passing between the different methods, tasks, etc. This information must be basic data types (such as dicts, lists, numbers, strings... anything you can encode in JSON), and not your own objects or similar.
+
+For example:
+
+.. code-block:: python
+
+   from weblablib import requires_active, weblab_user
+
+   @app.route('/status')
+   @requires_active
+   def status():
+       # jsonify returns a JSON where {lights: result}
+       # plus adds the 'application/json' headers, etc.
+       return jsonify(lights=get_light_status(),
+                      time_left=weblab_user.time_left,
+                      error=False)
 
 
+In this case, we have added to the response of status the time in seconds that is left to the
+current user. You do not need to work on checking if ``weblab_user`` is anonymous or expired
+since the method already has a ``@requires_active`` decorator (so if it's an anonymous user
+the user will see "access forbidden", and if he is a user whose time already passed, will be
+redirected to his ``weblab_user.back`` URL).
 
-# init_app
-# POLLING
-# LOGOUT
+If the behavior of ``requires_active`` is too strict for your case, you also have a
+``requires_login`` decorator. The difference is that while the former requires the user to
+have access to the laboratory right now, the latter also accepts users which were using the
+laboratory and now they can not use it anymore. For example, if the user was doing some
+exercises, you may want to let the student to download the exercises for some time. In this
+case, you may use ``requires_active`` to ``status`` or ``light`` (since whoever calls must
+be assigend to the laboratory), but ``requires_login`` to ``index`` (and there, depending on
+if the user is active or not, show one thing or another):
+
+.. code-block:: python
+
+   from weblablib import requires_login, weblab_user
+
+   @app.route('/')
+   @requires_login
+   def index():
+       if weblab_user.active:
+           # Show something for current users
+       else:
+           # Show something for past users
+
+Additionally, in the templates you have access to ``weblab`` and ``weblab_user``, so you can
+simply run:
+
+.. code-block:: python
+
+   from weblablib import requires_login
+
+   @app.route('/')
+   @requires_login
+   def index():
+       return render_template('index.html')
+
+And in the HTML code display:
+
+.. code-block:: jinja
+
+   {% if not weblab_user.active %}
+       <a href="{{ weblab_user.back }}">Back</a>
+
+       {# ... #}
+
+       <div class="alert alert-warning">
+           <h1>You don't have access to the laboratory anymore but
+           you can download the following resources</h1>
+
+           {# ... #}
+       </div>
+   {% endif %}
+
+With this information, we can improve our example app by adding this in the JavaScript code:
+
+.. code-block:: javascript
+
+   var TIMER_INTERVAL = null;
+   var TIME_LEFT = null;
+
+   // Instead of the previously existing clean() function
+   function clean() {
+       clearInterval(STATUS_INTERVAL);
+       clearInterval(TIME_LEFT);
+       $("#panel").hide();
+       $("#timer").text("session is over");
+   }
+
+   // Instead of the previuosly existing parseStatus
+   function parseStatus(newStatus) {
+       if (newStatus.error == false) {
+           for (var i = 1; i < 11; i++) {
+               if(newStatus.lights["light-" + i]) {
+                   $("#light_" + i + "_off").hide();
+                   $("#light_" + i + "_on").show();
+               } else {
+                   $("#light_" + i + "_on").hide();
+                   $("#light_" + i + "_off").show();
+               }
+           }
+           if (TIMER_INTERVAL == null) {
+               TIME_LEFT = Math.round(newStatus.time_left);
+               $("#timer").text("" + TIME_LEFT + " seconds");
+               TIMER_INTERVAL = setInterval(function () {
+                   TIME_LEFT = TIME_LEFT - 1;
+                   if (TIME_LEFT >= 0) {
+                       $("#timer").text("" + TIME_LEFT + " seconds");
+                   } else {
+                       clean();
+                   }
+               }, 1000);
+           }
+       } else {
+           clean();
+       }
+   }
+
+This way, in the beginning ``TIMER_INTERVAL`` is ``null``, but whenever we parse a status
+from the server side (and therefore we receive a ``time_left`` value), we can start
+a new interval that every second it changes the time left.
+
+
+Adding basic settings
+~~~~~~~~~~~~~~~~~~~~~
+
+There are three mandatory variables that you have to configure in weblablib:
+
+.. tabularcolumns:: |p{6.5cm}|p{8.5cm}|
+
+================================= =========================================
+``WEBLAB_CALLBACK``               The student will be redirected by
+                                  WebLab-Deusto to one URL containing a
+                                  one-time secret. This parameter
+                                  establishes the begining of the URL.
+                                  You don't need to use it for anything
+                                  else.
+``WEBLAB_USERNAME``               WebLab-Deusto has a pair of credentials
+                                  representing a particular WebLab-Deusto
+                                  instance in a particular laboratory.
+                                  These pair are a *username* and a
+                                  *password*, but they represent
+                                  WebLab-Deusto, **not** the particular
+                                  user coming from WebLab-Deusto. In
+                                  WebLab-Deusto, this property is called
+                                  ``http_experiment_username``.
+``WEBLAB_PASSWORD``               Same as ``WEBLAB_USERNAME``, but this
+                                  property representing the
+                                  ``http_experiment_password``
+                                  configuration value of WebLab-Deusto.
+================================= =========================================
+
+So, for example, we could use:
+
+.. code-block:: python
+
+   app = Flask(__name__)
+   app.config.update({
+       'SECRET_KEY': 'something-random',
+       'WEBLAB_CALLBACK': '/mycallback',
+       'WEBLAB_USERNAME': 'weblabdeusto',
+       'WEBLAB_PASSWORD': 'password',
+   })
+
+
+Initializing and cleaning resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Very often, you need to prepare the laboratory for the user before he uses it, and/or clean resources after the user has used them.
+
+To do so, you can modify the ``hardware.py`` file to support:
+
+.. code-block:: python
+
+   from laboratory import weblab
+   from weblablib import weblab_user
+
+   @weblab.on_start
+   def start(client_data, server_data):
+       print("Initializing {}".format(weblab_user))
+
+   @weblab.on_dispose
+   def dispose():
+       print("Disposing {}".format(weblab_user))
+       clean_resources()
+
+And, in ``laboratory.py``, move ``import hardware`` to the end of the file.
+
+This way, for each user, this code will be run once at the beginning. If an error is produced in your ``start`` method,
+the user will not be redirected and WebLab-Deusto will consider the laboratory as broken for a while before sending other
+user.
+
+The ``@weblab.on_dispose`` method is guaranteed to be run at some point in a matter of seconds or minutes after the user
+is not using the laboratory anymore, *as long as the process is running*. However, there are situations (for example, you
+configure Redis to not persist data in disk periodically and suddenly the computer where this code is running is restarted)
+where it may not be run. For this reason, it is recommended that you run your ``clean_resources`` before running gunicorn or
+whatever server you use later.
+
+For example, you can add this code in ``laboratory.py``:
+
+
+.. code-block:: python
+
+   import hardware
+
+   @app.cli.command('clean-resources')
+   def clean_resources_command():
+       hardware.clean_resources()
+
+so later you can run:
+
+.. code-block:: shell
+
+   $ flask clean-resources
+
+When the computer is restarted or before running the script that runs your laboratory or similar (see ``examples/advanced`` for more).
+
+.. warning::
+
+
+   Note that this code is run outside the web browser, so Flask objects like ``session`` will not work.
+
+   Also note that, in general, it is a bad idea to store global information in a Flask script. If you are
+   later running several processes (as it is normal), your laboratory will not work. If you need to store
+   anything, rely on Redis see ``examples/advanced``) or a database or similar, not memory.
+
+   So, for example, **do not do this**:
+
+   .. code-block:: python
+
+      # DO NOT DO THIS
+      lights_on = False
+
+      @weblab.on_start
+      def start(client_data, server_data):
+          global lights_on
+          lights_on = True
+
+   If you later run this in ``gunicorn`` or similar with multiple workers, the same variable will have
+   different values in different servers.
+
+Running weblablib
+-----------------
+
+So far, you have seen what code to put, but you have not even installed **weblablib**, so you could not run it. Also,
+there are two ways to run this code: from WebLab-Deusto or, in development environments, from the console directly.
+This section is focused on installing and running this code.
+
+Installing weblablib
+~~~~~~~~~~~~~~~~~~~~
+
+Earlier, you installed Flask by creating an virtual environment (or not) following the instructions of `the Flask installation documentation <http://flask.pocoo.org/docs/latest/installation/>`_.
+So as to install **weblablib**, you only have to activate the same virtual environment (if you were using any) and run:
+
+.. code-block:: shell
+
+   $ pip install weblablib
+
+.. note::
+
+   If you have installed WebLab-Deusto in this computer, please use a different virtual environment to
+   avoid any potential conflict. For example, if you installed WebLab-Deusto in a virtualenv called
+   weblab, create another virtualenv for weblablib:
+
+   .. code-block:: shell
+
+      $ mkvirtualenv wlib
+      (wlib) % pip install weblablib
+
+Installing redis
+~~~~~~~~~~~~~~~~
+
+**weblablib** relies on `Redis <https://redis.io/>`_, an Open Source, in-memory data structure store. In Linux distributions you can typically install it from the repositories:
+
+.. code-block:: shell
+
+   $ sudo apt-get install redis-server
+
+In Microsoft Windows, you can use `Redis for Windows <https://github.com/MicrosoftArchive/redis/releases>`_, supported by Microsoft. You can either download the installer (beware that you download the *Latest release* and not a *Pre-release* which might come with bugs), or `use nuget <https://www.nuget.org/packages/redis-64/>`_.
+
+In Mac OS X, you can install it manually or use Homebrew.
+
+Development
+~~~~~~~~~~~
+
+Once **weblablib** is installed, running the script is exactly as before:
+
+.. code-block:: shell
+
+   $ export FLASK_DEBUG=1
+   $ export FLASK_APP=laboratory.py
+   $ flask run
+
+However, if you open the web browser and go to the laboratory site:
+
+ * http://localhost:5000/
+
+You will only see ``Access forbidden``. So as to access the laboratory, you have to either:
+
+ * Install WebLab-Deusto, follow `these instructions <http://weblabdeusto.readthedocs.io/en/latest/remote_lab_deployment.html>`_ (in particular, the *Unmanaged server* section, and configure with the following parameters:
+   * ``http_experiment_url: http://localhost:5000/``
+   * ``http_experiment_username: weblabdeusto`` (or whatever you used in ``WEBLAB_USERNAME``)
+   * ``http_experiment_password: password``  (or whatever you used in ``WEBLAB_PASSWORD``)
+ * **OR** use the command line interface for debugging.
+
+The former is mandatory for the production mode, but the latter is the easiest version when working with. In this case, you simply run the following in a different terminal:
+
+.. code-block:: shell
+
+   $ export FLASK_DEBUG=1
+   $ export FLASK_APP=laboratory.py
+   $ flask fake-new-user --open-browser
+
+This fakes a request from WebLab-Deusto, creating a new user. The argument ``--open-browser`` is optional, but providing it will open a session your default web browser (check `more information on how thisworks <https://docs.python.org/2/library/webbrowser.html>`_ if it uses a web browser you don't want).
+
+As you see, you will end in http://localhost:5000/ but with a working valid WebLab-Deusto session. ``fake-new-user`` uses some default parameters, that you can change:
+
+.. code-block:: shell
+
+   $ flask fake-new-user --help
+   Usage: flask fake-new-user [OPTIONS]
+
+     Create a fake WebLab-Deusto user session.
+
+     This command creates a new user session and stores the session in disk, so
+     you can use other commands to check its status or delete it.
+
+   Options:
+     --name TEXT              First and last name
+     --username TEXT          Username passed
+     --username-unique TEXT   Unique username passed
+     --assigned-time INTEGER  Time in seconds passed to the laboratory
+     --back TEXT              URL to send the user back
+     --open-browser           Open the fake use in a web browser
+     --help                   Show this message and exit.
+
+So, for example, you could also run:
+
+.. code-block:: shell
+
+   $ flask fake-new-user --name "Homer Simpson" --username hsimpson \
+                         --username-unique "hsimpson@labsland" \
+                         --assigned-time 600 \
+                         --back https://en.wikipedia.org/wiki/Homer_Simpson \
+                         --open-browser
+
+You can also fake stopping the current session by running:
+
+.. code-block:: shell
+
+   $ flask fake-dispose
+
+It will delete the current session, so in the next ``weblab_user``, it will be already an ``ExpiredUser``.
+
+You can also fake what's the current status as WebLab-Deusto does, contacting your laboratory every few seconds:
+
+.. code-block:: shell
+
+   $ flask fake-status
+
+Which will return a number indicating when you should contact again, in seconds.
+
+Production
+~~~~~~~~~~
+
+In a production environment, you should always use WebLab-Deusto, and you can rely on the `Flask deployment documentation <http://flask.pocoo.org/docs/0.12/deploying/>`_ to see how to deploy it.
+
+In the `advanced example in the github repository <https://github.com/weblabdeusto/weblablib/tree/master/examples/advanced>`_ you have two scripts to run it using the popular `gunicorn <http://gunicorn.org/>`_ web server. These files are `wsgi_app.py` and `gunicorn_start.sh`, and you can install gunicorn by running:
+
+.. code-block:: shell
+
+   $ pip install gunicorn
 

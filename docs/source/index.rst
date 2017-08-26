@@ -3,8 +3,8 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to weblablib's documentation!
-=====================================
+weblablib
+=========
 
 weblablib is a library for creating `WebLab-Deusto <https://github.com/weblabdeusto/weblabdeusto/>`_ remote laboratories.
 
@@ -14,15 +14,14 @@ Creating a remote laboratory may imply many layers, such as authentication, auth
 
 In the case of Python, with the popular `Flask <http://flask.pocoo.org>`_ microframework, weblablib is the wrapper used to create unmanaged labs. Unmanaged labs is a term used in WebLab-Deusto to refer laboratories where the authors develop the full stack (server, client, deployment), as opposed to managed labs.
 
-If you are familiar with Flask and with Web development, and want to be able to customize everything but not need to implement all the layers of authentication, administration, etc., this library would be very useful.
+If you are familiar with Flask and with Web development (while not necessarily), and want to be able to customize everything but not need to implement all the layers of authentication, administration, etc., this library would be very useful.
 
 .. toctree::
    :maxdepth: 2
 
    quickstart
-   development
    advanced
-   example
+   examples
    configuration
 
 

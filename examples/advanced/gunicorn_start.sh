@@ -16,6 +16,9 @@ VIRTUALENV_ACTIVATE=/home/user/.virtualenvs/mylab/bin/activate
 cd $FOLDER
 . $VIRTUALENV_ACTIVATE
 date
+export FLASK_DEBUG=0
+export FLASK_APP=autoapp.py
+flask clean-resources # Clean resources before running gunicorn
 gunicorn --bind 127.0.0.1:$PORT -w $WORKERS wsgi_app:application &
 
 child=$!
