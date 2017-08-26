@@ -1,5 +1,6 @@
 # weblablib
 
+[![documentation](https://readthedocs.org/projects/weblablib/badge/?version=latest)](https://weblablib.readthedocs.io)
 [![build status](https://travis-ci.org/weblabdeusto/weblablib.svg?branch=master)](https://travis-ci.org/weblabdeusto/weblablib)
 [![Coverage Status](https://coveralls.io/repos/github/weblabdeusto/weblablib/badge.svg?branch=master)](https://coveralls.io/github/weblabdeusto/weblablib?branch=master)
 [![Version](https://img.shields.io/pypi/v/weblablib.svg)](https://pypi.python.org/pypi/weblablib/)
