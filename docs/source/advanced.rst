@@ -46,8 +46,14 @@ Or asynchronously (common when it's tasks) and play with the ``WebLabTask`` obje
    # Flask session or in weblab_user.data
    task.task_id
 
-   # 'submitted', 'running' or 'failed'/'done' if finished.
+   # a string 'submitted', 'running' or 'failed'/'done' if finished.
    task.status
+    
+   task.submitted  # bool: not yet started by a worker
+   task.running    # bool: started by a worker, not yet finished
+   task.done       # bool: finished successfully
+   task.failed     # bool: finished with error
+   task.finished   # task.failed or task.done
 
    # These two attributes are None while 'submitted' or 'running'
    task.result # the result of the function
@@ -63,7 +69,7 @@ If you store the ``task.task_id``, you can retrieve the task in other views or l
 
    # and then ask if it is still running or not, and obtain
    # the result. You can also run:
-   if task.status == 'done':
+   if task.done:
        print(task.result)
 
 At any point (including ``on_dispose``), you can see what tasks are still running:

@@ -1654,6 +1654,36 @@ class WebLabTask(object):
             return task_data['status']
 
     @property
+    def done(self):
+        "Has the task finished successfully?"
+        return self.status == 'done'
+
+    @property
+    def running(self):
+        """
+        Is the task still running? Note that this is False if it was submitted and not yet started. 
+        If you want to know in general if it has finished or not, use 'finished'
+        """
+        return self.status == 'running'
+
+    @property
+    def submitted(self):
+        "Is the task submitted but not yet processed by a worker?"
+        return self.status == 'submitted'
+
+    @property
+    def failed(self):
+        "Has the task finished by failing?"
+        return self.status == 'failed'
+
+    @property
+    def finished(self):
+        """
+        Has the task finished? (either right or failing)
+        """
+        return self.status in ('done', 'failed')
+
+    @property
     def result(self):
         """
         In case of finishing (task.status == 'done'), this returns the result.

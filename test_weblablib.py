@@ -380,6 +380,11 @@ class UserTest(BaseSessionWebLabTest):
         self.assertIsNotNone(task1)
         self.assertEquals(task1.name, 'task')
         self.assertEquals(task1.status, 'submitted')
+        self.assertTrue(task1.submitted)
+        self.assertFalse(task1.finished)
+        self.assertFalse(task1.done)
+        self.assertFalse(task1.failed)
+        self.assertFalse(task1.running)
         self.assertEquals(task1.session_id, session_id1)
         self.assertIsNone(task1.result)
         self.assertIsNone(task1.error)
@@ -400,6 +405,11 @@ class UserTest(BaseSessionWebLabTest):
         # Let's retrieve the task again
         task2 = self.weblab.get_task(task_id)
         self.assertEquals(task2.status, 'done')
+        self.assertTrue(task2.done)
+        self.assertTrue(task2.finished)
+        self.assertFalse(task2.failed)
+        self.assertFalse(task2.submitted)
+        self.assertFalse(task2.running)
         self.assertIsNone(task2.error)
         self.assertEquals(task2.result, [1, 'bar'])
 
@@ -513,11 +523,21 @@ class TaskFailTest(BaseSessionWebLabTest):
 
         task = self.weblab.get_task(response)
         self.assertEquals(task.status, 'submitted')
+        self.assertTrue(task.submitted)
+        self.assertFalse(task.failed)
+        self.assertFalse(task.finished)
+        self.assertFalse(task.running)
+        self.assertFalse(task.done)
         
         with StdWrap():
             self.weblab.run_tasks()
 
         self.assertEquals(task.status, 'failed')
+        self.assertTrue(task.failed)
+        self.assertTrue(task.finished)
+        self.assertFalse(task.done)
+        self.assertFalse(task.running)
+        self.assertFalse(task.submitted)
         self.assertIsNone(task.result)
         self.assertIsNotNone(task.error)
         self.assertEqual(task.error['code'], 'exception')
@@ -551,6 +571,11 @@ class LongTaskTest(BaseSessionWebLabTest):
         while True:
             task = self.weblab.get_task(task_id)
             if task.status == 'running':
+                self.assertTrue(task.running)
+                self.assertFalse(task.finished)
+                self.assertFalse(task.done)
+                self.assertFalse(task.failed)
+                self.assertFalse(task.submitted)
                 break
             self.assertEquals(task.status, 'submitted')
             time.sleep(0.03)
