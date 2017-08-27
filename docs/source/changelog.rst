@@ -10,6 +10,8 @@ Version 0.3
  * Added ``weblab_user.experiment_name``, ``weblab_user.category_name`` and ``weblab_user.experiment_id`` as more metadata about the context on how the laboratory is used.
  * Added ``task.done``, ``task.failed``, ``task.finished``, ``task.running``, ``task.submitted`` so as to avoid playing with strings.
  * ``WEBLAB_CALLBACK_URL`` is now optional, and ``/callback`` by default.
+ * Added ``current_task`` that can be called inside a task to get the ``task_id`` or update data.
+ * Added ``current_task.data`` and ``current_task.update_data`` so as to update JSON-friendly data to measure the progress of the task.
 
 Version 0.2
 -----------

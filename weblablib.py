@@ -640,6 +640,7 @@ class WebLab(object):
             self._set_session_id(session_id)
             user = self._redis_manager.get_user(session_id)
             _set_weblab_user_cache(user)
+            g._weblab_task_id = task_id
             try:
                 result = func(*args, **kwargs)
             except Exception as error:
@@ -651,6 +652,8 @@ class WebLab(object):
                 })
             else:
                 self._redis_manager.finish_task(task_id, result=result)
+            finally:
+                delattr(g, '_weblab_task_id')
 
 
     def task(self):
@@ -775,6 +778,8 @@ class AnonymousUser(WebLabUser):
     def __str__(self):
         return "Anonymous user"
 
+_OBJECT = object()
+
 @six.python_2_unicode_compatible
 class CurrentUser(WebLabUser):
     """
@@ -862,6 +867,24 @@ class CurrentUser(WebLabUser):
         redis_manager = _current_redis()
         redis_manager.update_data(self._session_id, data)
         self._data = data
+
+    def update_data(self, new_data = _OBJECT):
+        """
+        Updates data:
+
+        task.data['foo'] = 'bar'
+        task.update_data()
+
+        or:
+
+        task.update_data({'foo': 'bar'})
+        """
+        if new_data == _OBJECT:
+            new_data = self._data
+
+        redis_manager = _current_redis()
+        redis_manager.update_data(self._session_id, new_data)
+        self._data = new_data
 
     @property
     def time_without_polling(self):
@@ -967,6 +990,9 @@ class ExpiredUser(WebLabUser):
     def data(self, value):
         raise NotImplementedError("You can't change data on an ExpiredUser")
 
+    def update_data(self, value=None):
+        raise NotImplementedError("You can't change data on an ExpiredUser")
+
     @property
     def time_left(self):
         return 0
@@ -1038,6 +1064,16 @@ def _set_weblab_user_cache(user):
     return user
 
 weblab_user = LocalProxy(_weblab_user) # pylint: disable=invalid-name
+
+def _current_task():
+    task_id = getattr(g, '_weblab_task_id', None)
+    if task_id is None:
+        return None
+
+    weblab = _current_weblab()
+    return WebLabTask(weblab=weblab, task_id=task_id)
+
+current_task = LocalProxy(_current_task) # pylint: disable=invalid-name
 
 def requires_login(func):
     """
@@ -1469,6 +1505,7 @@ class _RedisManager(object):
         pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'finished', 'false')
         pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'error', 'null')
         pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'result', 'null')
+        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'data', json.dumps({}))
         # Missing (normal): running. When created, we know if it's a new key and therefore that
         # no other thread is processing it.
         pipeline.execute()
@@ -1542,6 +1579,16 @@ class _RedisManager(object):
             # If it had been deleted... delete it
             self.client.delete(key)
 
+    def update_task_data(self, task_id, new_data):
+        key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
+        pipeline = self.client.pipeline()
+        pipeline.hget(key, 'name')
+        pipeline.hset(key, 'data', json.dumps(new_data))
+        name, _ = pipeline.execute()
+        if name is None:
+            # Deleted in the meanwhile
+            self.client.delete(key)
+
     def get_task(self, task_id):
         key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
 
@@ -1552,13 +1599,15 @@ class _RedisManager(object):
         pipeline.hget(key, 'result')
         pipeline.hget(key, 'running')
         pipeline.hget(key, 'name')
-        session_id, finished, error_str, result_str, running, name = pipeline.execute()
+        pipeline.hget(key, 'data')
+        session_id, finished, error_str, result_str, running, name, data_str = pipeline.execute()
 
         if session_id is None:
             return None
 
         error = json.loads(error_str)
         result = json.loads(result_str)
+        data = json.loads(data_str)
 
         if not running:
             status = 'submitted'
@@ -1577,6 +1626,7 @@ class _RedisManager(object):
             'status': status,
             'session_id': session_id,
             'name': name,
+            'data': data,
         }
 
     def get_all_tasks(self, session_id):
@@ -1698,6 +1748,19 @@ class WebLabTask(object):
         task_data = self._task_data
         if task_data:
             return task_data['name']
+
+    @property
+    def data(self):
+        task_data = self._task_data
+        if task_data:
+            return task_data['data']
+
+    @data.setter
+    def data(self, new_data):
+        self._redis_manager.update_task_data(self._task_id, new_data)
+
+    def update_data(self, new_data):
+        self._redis_manager.update_task_data(self._task_id, new_data)
 
     @property
     def status(self):

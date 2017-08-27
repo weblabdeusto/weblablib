@@ -198,6 +198,7 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
             client.get('/lab/')
             self.assertTrue(weblablib.weblab_user.is_anonymous)
             self.assertFalse(weblablib.weblab_user.active)
+            self.assertIsNone(weblablib.weblab_user.locale)
 
     def test_anonymous_on_active(self):
         with self.app.test_client() as client:
@@ -352,12 +353,16 @@ class UserTest(BaseSessionWebLabTest):
 
         # And in any case build another
         if weblablib.weblab_user.active:
+            # Optional, forces an immediate synchronization
+            weblablib.weblab_user.update_data()
             weblablib.weblab_user.data = {'foo': 'bar'}
 
         return render_template_string("@@task@@%s@@task@@{{ weblab_poll_script() }}" % task.task_id)
 
     def task(self):
         self.counter += 1
+        weblablib.current_task.data = {'inside': 'previous'}
+        weblablib.current_task.update_data({'inside': 'yes'})
         return [ self.counter, weblablib.weblab_user.data['foo'] ]
 
     def test_simple(self):
@@ -420,6 +425,10 @@ class UserTest(BaseSessionWebLabTest):
         self.assertFalse(task2.running)
         self.assertIsNone(task2.error)
         self.assertEquals(task2.result, [1, 'bar'])
+        self.assertIn('inside', task2.data)
+        self.assertEquals(task2.data['inside'], 'yes')
+
+        self.assertFalse(weblablib.current_task)
 
         # And let's see how it's the same task as before
         self.assertEquals(task1, task2)
@@ -464,12 +473,14 @@ class UserTest(BaseSessionWebLabTest):
         self.assertIn(session_id1, str(weblablib.weblab_user))
         with self.assertRaises(NotImplementedError):
             weblablib.weblab_user.data = {}
+
+        with self.assertRaises(NotImplementedError):
+            weblablib.weblab_user.update_data()
         self.assertEquals(weblablib.weblab_user.locale, 'es')
         self.assertEquals(weblablib.weblab_user.full_name, 'Jim Smith')
         self.assertEquals(weblablib.weblab_user.experiment_name, 'mylab')
         self.assertEquals(weblablib.weblab_user.category_name, 'Lab experiments')
         self.assertEquals(weblablib.weblab_user.experiment_id, 'mylab@Lab experiments')
-
 
     def test_status_concrete_time_left(self):
         # New user, with 3 seconds

@@ -86,6 +86,25 @@ Or all the tasks assigned in this session (finished or not):
    for task in weblab.tasks:
         print(task.name, task.result)
 
+Also, inside the task, you can get information and change information about the task:
+
+.. code-block:: python
+   
+   from weblablib import current_task
+
+   @weblab.task()
+   def program_device(path):
+       # ...
+       current_task.task_id
+       print(current_task.data)
+       current_task.update_data({ 'a': 'b' })
+
+And obtain this information from outside:
+
+.. code-block:: python
+
+   task = weblab.get_task(task_id)
+   print(task.data['a'])
 
 When WebLab-Deusto calls to clean resources to your laboratory, **weblablib** will report
 of whether all the tasks assigned to the current session have finished or not, and no
