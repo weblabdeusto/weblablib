@@ -1,10 +1,10 @@
 # weblablib
 
 [![documentation](https://readthedocs.org/projects/weblablib/badge/?version=0.2)](https://weblablib.readthedocs.io/en/0.2/)
-[![build status](https://travis-ci.org/weblabdeusto/weblablib.svg?branch=master)](https://travis-ci.org/weblabdeusto/weblablib)
-[![Coverage Status](https://coveralls.io/repos/github/weblabdeusto/weblablib/badge.svg?branch=master)](https://coveralls.io/github/weblabdeusto/weblablib?branch=master)
 [![Version](https://img.shields.io/pypi/v/weblablib.svg)](https://pypi.python.org/pypi/weblablib/)
 [![Python versions](https://img.shields.io/pypi/pyversions/weblablib.svg)](https://pypi.python.org/pypi/weblablib/)
+[![build status](https://travis-ci.org/weblabdeusto/weblablib.svg?branch=master)](https://travis-ci.org/weblabdeusto/weblablib)
+[![Coverage Status](https://coveralls.io/repos/github/weblabdeusto/weblablib/badge.svg?branch=master)](https://coveralls.io/github/weblabdeusto/weblablib?branch=master)
 
 **weblablib** is a library for creating [WebLab-Deusto](https://github.com/weblabdeusto/weblabdeusto/) remote laboratories.
 
