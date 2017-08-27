@@ -186,3 +186,31 @@ For example:
 
 And then in nginx or Apache configuring that https://yourserver/lab1 goes to http://localhost:8080/lab1 will work. In this case, you have to configure ``http_experiment_url`` to ``http://localhost:8080/lab1``. In some circumstances, you may also want to provide a base URL for weblab alone. In that case, you can use the ``WEBLAB_BASE`` url.
 
+Internationalization (i18n)
+---------------------------
+
+The object ``weblab_user`` has a ``locale`` parameter; which is ``None`` in the Anonymous
+user, but it's ``en``, ``es``... depending on what WebLab-Deusto said (which may come from
+the previous system, such as the LMS or Moodle).
+
+Therefore, if you are using ``Flask-Babel`` or ``Flask-BabelEx``, the script for selecting
+locale should be similar to:
+
+.. code-block:: python
+
+    @babel.localeselector
+    def get_locale():
+        locale = request.args.get('locale', None)
+        if locale is None:
+            locale = weblab_user.locale
+        if locale is None:
+            locale = session.get('locale')
+        if locale is None:
+            locale = request.accept_languages.best_match(SUPPORTED_LANGUAGES)
+        if locale is None:
+            locale = 'en'
+        session['locale'] = locale
+        return locale
+
+*New in weblablib 0.3*
+

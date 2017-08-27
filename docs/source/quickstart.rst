@@ -955,6 +955,7 @@ As you see, you will end in http://localhost:5000/ but with a working valid WebL
      --username-unique TEXT   Unique username passed
      --assigned-time INTEGER  Time in seconds passed to the laboratory
      --back TEXT              URL to send the user back
+     --locale TEXT            Language
      --open-browser           Open the fake use in a web browser
      --help                   Show this message and exit.
 
@@ -966,6 +967,7 @@ So, for example, you could also run:
                          --username-unique "hsimpson@labsland" \
                          --assigned-time 600 \
                          --back https://en.wikipedia.org/wiki/Homer_Simpson \
+                         --locale en
                          --open-browser
 
 You can also fake stopping the current session by running:

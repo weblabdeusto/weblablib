@@ -296,7 +296,7 @@ class BaseSessionWebLabTest(BaseWebLabTest):
         self.client.__exit__(None, None, None)
         super(BaseSessionWebLabTest, self).tearDown()
 
-    def new_user(self, name='Jim Smith', username='jim.smith', username_unique='jim.smith@labsland', assigned_time=300, back='http://weblab.deusto.es'):
+    def new_user(self, name='Jim Smith', username='jim.smith', username_unique='jim.smith@labsland', assigned_time=300, back='http://weblab.deusto.es', language='en'):
         assigned_time = float(assigned_time)
 
         start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
@@ -309,6 +309,7 @@ class BaseSessionWebLabTest(BaseWebLabTest):
                 'request.username': username,
                 'request.full_name': name,
                 'request.username.unique': username_unique,
+                'request.locale': language,
             },
             'back': back,
         }
@@ -358,7 +359,7 @@ class UserTest(BaseSessionWebLabTest):
 
     def test_simple(self):
         # New user 
-        launch_url1, session_id1 = self.new_user()
+        launch_url1, session_id1 = self.new_user(language='es')
 
         # counter is zero
         self.counter = 0
@@ -368,6 +369,7 @@ class UserTest(BaseSessionWebLabTest):
         response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
 
         self.assertEquals(weblablib.weblab_user.session_id, session_id1)
+        self.assertEquals(weblablib.weblab_user.locale, 'es')
 
         task_id = response.split('@@task@@')[1]
 
