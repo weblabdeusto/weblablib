@@ -186,6 +186,8 @@ For example:
 
 And then in nginx or Apache configuring that https://yourserver/lab1 goes to http://localhost:8080/lab1 will work. In this case, you have to configure ``http_experiment_url`` to ``http://localhost:8080/lab1``. In some circumstances, you may also want to provide a base URL for weblab alone. In that case, you can use the ``WEBLAB_BASE`` url.
 
+.. _internationalization:
+
 Internationalization (i18n)
 ---------------------------
 
