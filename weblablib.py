@@ -286,10 +286,10 @@ class WebLab(object):
         # Add a callback URL
         #
         if not self._callback_url:
-            self._callback_url = self._app.config.get(ConfigurationKeys.WEBLAB_CALLBACK_URL)
+            self._callback_url = self._app.config.get(ConfigurationKeys.WEBLAB_CALLBACK_URL, '/callback')
 
         if not self._callback_url:
-            raise InvalidConfigError("Invalid callback URL. Either provide it in the constructor or in the WEBLAB_CALLBACK_URL configuration")
+            raise InvalidConfigError("Empty URL. Either provide it in the constructor or in the WEBLAB_CALLBACK_URL configuration")
         elif self._callback_url.endswith('/'):
             print("Note: your callback URL ({}) ends with '/'. It is discouraged".format(self._callback_url), file=sys.stderr)
 

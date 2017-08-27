@@ -749,17 +749,11 @@ a new interval that every second it changes the time left.
 Adding basic settings
 ~~~~~~~~~~~~~~~~~~~~~
 
-There are three mandatory variables that you have to configure in weblablib:
+There are two mandatory variables that you have to configure in weblablib:
 
 .. tabularcolumns:: |p{6.5cm}|p{8.5cm}|
 
 ================================= =========================================
-``WEBLAB_CALLBACK``               The student will be redirected by
-                                  WebLab-Deusto to one URL containing a
-                                  one-time secret. This parameter
-                                  establishes the begining of the URL.
-                                  You don't need to use it for anything
-                                  else.
 ``WEBLAB_USERNAME``               WebLab-Deusto has a pair of credentials
                                   representing a particular WebLab-Deusto
                                   instance in a particular laboratory.
@@ -782,7 +776,6 @@ So, for example, we could use:
    app = Flask(__name__)
    app.config.update({
        'SECRET_KEY': 'something-random',
-       'WEBLAB_CALLBACK': '/mycallback',
        'WEBLAB_USERNAME': 'weblabdeusto',
        'WEBLAB_PASSWORD': 'password',
    })

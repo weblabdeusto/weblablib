@@ -43,7 +43,6 @@ class BaseWebLabTest(unittest.TestCase):
     def get_config(self):
         return {
             'SECRET_KEY': 'super-secret',
-            'WEBLAB_CALLBACK_URL': '/mylab/callback',
             'WEBLAB_USERNAME': 'weblabdeusto',
             'WEBLAB_PASSWORD': 'password',
             'SERVER_NAME': self.server_name,
@@ -184,14 +183,14 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
         
         with StdWrap():
             with self.app.test_client() as client:
-                result = self.get_text(client.get('/mylab/callback/session.not.found'))
+                result = self.get_text(client.get('/callback/session.not.found'))
 
         self.assertIn('ERROR', result)
         self.assertIn('weblab.initial_url', result)
 
     def test_callback(self):
         with self.app.test_client() as client:
-            result = self.get_text(client.get('/mylab/callback/session.not.found'))
+            result = self.get_text(client.get('/callback/session.not.found'))
             self.assertIn('forbidden', result)
 
     def test_anonymous(self):
@@ -672,21 +671,20 @@ class WebLabConfigErrorsTest(unittest.TestCase):
 
     def test_callback(self):
         self._check_error({
+                'WEBLAB_CALLBACK_URL': '',
                 'WEBLAB_USERNAME': 'weblabdeusto',
                 'WEBLAB_PASSWORD': 'password',
                 'SERVER_NAME': 'localhost:5000',
-            }, ValueError, "Invalid callback")
+            }, ValueError, "Empty URL")
 
     def test_username(self):
         self._check_error({
-                'WEBLAB_CALLBACK_URL': '/mylab/callback',
                 'WEBLAB_PASSWORD': 'password',
                 'SERVER_NAME': 'localhost:5000',
             }, ValueError, "Missing WEBLAB_USERNAME")
 
     def test_password(self):
         self._check_error({
-                'WEBLAB_CALLBACK_URL': '/mylab/callback',
                 'WEBLAB_USERNAME': 'weblabdeusto',
                 'SERVER_NAME': 'localhost:5000',
             }, ValueError, "Missing WEBLAB_PASSWORD")
@@ -701,8 +699,8 @@ class WebLabSetupErrorsTest(unittest.TestCase):
     def test_app_trailing_slashes(self):
         app = Flask(__name__)
         app.config.update({
-            'WEBLAB_CALLBACK_URL': '/mylab/callback/',
             'WEBLAB_BASE_URL': '/mylab/',
+            'WEBLAB_CALLBACK_URL': '/mylab/callback/',
             'WEBLAB_USERNAME': 'weblabdeusto',
             'WEBLAB_PASSWORD': 'password',
             'SERVER_NAME': 'localhost:5000',
@@ -714,7 +712,6 @@ class WebLabSetupErrorsTest(unittest.TestCase):
     def test_missing_server_name(self):
         app = Flask(__name__)
         app.config.update({
-            'WEBLAB_CALLBACK_URL': '/mylab/callback',
             'WEBLAB_USERNAME': 'weblabdeusto',
             'WEBLAB_PASSWORD': 'password',
         })
@@ -730,7 +727,6 @@ class WebLabSetupErrorsTest(unittest.TestCase):
     def test_app_twice(self):
         app = Flask(__name__)
         app.config.update({
-            'WEBLAB_CALLBACK_URL': '/mylab/callback',
             'WEBLAB_USERNAME': 'weblabdeusto',
             'WEBLAB_PASSWORD': 'password',
             'SERVER_NAME': 'localhost:5000',
@@ -742,7 +738,6 @@ class WebLabSetupErrorsTest(unittest.TestCase):
     def test_app_twice_different_apps(self):
         app1 = Flask(__name__)
         app1.config.update({
-            'WEBLAB_CALLBACK_URL': '/mylab/callback',
             'WEBLAB_USERNAME': 'weblabdeusto',
             'WEBLAB_PASSWORD': 'password',
             'SERVER_NAME': 'localhost:5000',
@@ -758,7 +753,6 @@ class WebLabSetupErrorsTest(unittest.TestCase):
     def test_app_two_weblabs_same_app(self):
         app = Flask(__name__)
         app.config.update({
-            'WEBLAB_CALLBACK_URL': '/mylab/callback',
             'WEBLAB_USERNAME': 'weblabdeusto',
             'WEBLAB_PASSWORD': 'password',
             'WEBLAB_BASE_URL': '/foo',
@@ -795,7 +789,6 @@ class WebLabSetupErrorsTest(unittest.TestCase):
     def _create_weblab(self):
         self.app = Flask(__name__)
         self.app.config.update({
-            'WEBLAB_CALLBACK_URL': '/mylab/callback',
             'WEBLAB_USERNAME': 'weblabdeusto',
             'WEBLAB_PASSWORD': 'password',
             'SERVER_NAME': 'localhost:5000',

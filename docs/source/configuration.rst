@@ -18,9 +18,6 @@ The following are the configuration variables of **weblablib**:
                                   receiving methods directly by the user.
                                   This methods must be publicly available by
                                   the student. It can be ``/mylab/callback``.
-                                  **Mandatory** (unless you provide
-                                  ``callback_url`` parameter to the ``WebLab``
-                                  constructor).
 ``WEBLAB_BASE_URL``               If you want to start /weblab/sessions
                                   somewhere else (e.g., ``/mylab``), you can
                                   configure it here.
