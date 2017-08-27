@@ -1,0 +1,17 @@
+.. _changelog:
+
+Changelog
+=========
+
+Version 0.3
+-----------
+
+ * Added ``weblab_user.locale`` for i18n processing.
+ * Added ``weblab_user.experiment_name``, ``weblab_user.category_name`` and ``weblab_user.experiment_id`` as more metadata about the context on how the laboratory is used.
+ * Added ``task.done``, ``task.failed``, ``task.finished``, ``task.running``, ``task.submitted`` so as to avoid playing with strings.
+ * ``WEBLAB_CALLBACK_URL`` is now optional, and ``/callback`` by default.
+
+Version 0.2
+-----------
+
+Version 0.1 was uploaded to Pypi, etc., but was not production ready (no tests, docs, some bugs, etc.)

@@ -410,8 +410,10 @@ class WebLab(object):
             @click.option('--assigned-time', default=300, help="Time in seconds passed to the laboratory")
             @click.option('--back', default='http://weblab.deusto.es', help="URL to send the user back")
             @click.option('--locale', default='en', help="Language")
+            @click.option('--experiment-name', default='mylab', help="Experiment name")
+            @click.option('--category-name', default='Lab Experiments', help="Category name (of the experiment)")
             @click.option('--open-browser', is_flag=True, help="Open the fake use in a web browser")
-            def fake_user(name, username, username_unique, assigned_time, back, locale, open_browser):
+            def fake_user(name, username, username_unique, assigned_time, back, locale, experiment_name, category_name, open_browser):
                 """
                 Create a fake WebLab-Deusto user session.
 
@@ -431,6 +433,8 @@ class WebLab(object):
                         'request.full_name': name,
                         'request.username.unique': username_unique,
                         'request.locale': locale,
+                        'request.experiment_id.experiment_name': experiment_name,
+                        'request.experiment_id.category_name': category_name,
                     },
                     'back': back,
                 }
@@ -786,7 +790,7 @@ class CurrentUser(WebLabUser):
     """
 
     def __init__(self, session_id, back, last_poll, max_date, username, username_unique, 
-                 exited, data, locale, full_name):
+                 exited, data, locale, full_name, experiment_name, category_name, experiment_id):
         self._session_id = session_id
         self._back = back
         self._last_poll = last_poll
@@ -797,6 +801,21 @@ class CurrentUser(WebLabUser):
         self._data = data
         self._locale = locale
         self._full_name = full_name
+        self._experiment_name = experiment_name
+        self._category_name = category_name
+        self._experiment_id = experiment_id
+
+    @property
+    def experiment_name(self):
+        return self._experiment_name
+
+    @property
+    def category_name(self):
+        return self._category_name
+
+    @property
+    def experiment_id(self):
+        return self._experiment_id
 
     @property
     def full_name(self):
@@ -862,7 +881,11 @@ class CurrentUser(WebLabUser):
         """
         Create a ExpiredUser based on the data of the user
         """
-        return ExpiredUser(session_id=self._session_id, back=self._back, max_date=self._max_date, username=self._username, username_unique=self._username_unique, data=self._data, locale=self._locale, full_name=self._full_name)
+        return ExpiredUser(session_id=self._session_id, back=self._back, max_date=self._max_date, 
+                           username=self._username, username_unique=self._username_unique, 
+                           data=self._data, locale=self._locale, full_name=self._full_name,
+                           experiment_name=self._experiment_name, category_name=self._category_name,
+                           experiment_id=self._experiment_id)
 
     @property
     def active(self):
@@ -882,7 +905,8 @@ class ExpiredUser(WebLabUser):
 
     All the fields are same as in User.
     """
-    def __init__(self, session_id, back, max_date, username, username_unique, data, locale, full_name):
+    def __init__(self, session_id, back, max_date, username, username_unique, data, locale, 
+                 full_name, experiment_name, category_name, experiment_id):
         self._session_id = session_id
         self._back = back
         self._max_date = max_date
@@ -891,6 +915,21 @@ class ExpiredUser(WebLabUser):
         self._data = data
         self._locale = locale
         self._full_name = full_name
+        self._experiment_name = experiment_name
+        self._category_name = category_name
+        self._experiment_id = experiment_id
+
+    @property
+    def experiment_name(self):
+        return self._experiment_name
+
+    @property
+    def category_name(self):
+        return self._category_name
+
+    @property
+    def experiment_id(self):
+        return self._experiment_id
 
     @property
     def full_name(self):
@@ -1129,6 +1168,10 @@ def _process_start_request(request_data):
     if locale and len(locale) > 2:
         locale = locale[:2]
 
+    experiment_name = server_initial_data['request.experiment_id.experiment_name']
+    category_name = server_initial_data['request.experiment_id.category_name']
+    experiment_id = '{}@{}'.format(experiment_name, category_name)
+
     # Create a global session
     session_id = _create_token()
 
@@ -1138,7 +1181,8 @@ def _process_start_request(request_data):
                        username=server_initial_data['request.username'],
                        username_unique=server_initial_data['request.username.unique'],
                        exited=False, data={}, locale=locale,
-                       full_name=full_name)
+                       full_name=full_name, experiment_name=experiment_name,
+                       experiment_id=experiment_id, category_name=category_name)
 
     redis_manager = _current_redis()
 
@@ -1233,6 +1277,9 @@ class _RedisManager(object):
         pipeline.hset(key, 'exited', json.dumps(user.exited))
         pipeline.hset(key, 'locale', json.dumps(user.locale))
         pipeline.hset(key, 'full_name', json.dumps(user.full_name))
+        pipeline.hset(key, 'experiment_name', json.dumps(user.experiment_name))
+        pipeline.hset(key, 'category_name', json.dumps(user.category_name))
+        pipeline.hset(key, 'experiment_id', json.dumps(user.experiment_id))
         pipeline.expire(key, expiration)
         pipeline.set('{}:weblab:sessions:{}'.format(self.key_base, session_id), time.time())
         pipeline.expire('{}:weblab:sessions:{}'.format(self.key_base, session_id), expiration + 300)
@@ -1265,35 +1312,45 @@ class _RedisManager(object):
         pipeline = self.client.pipeline()
         key = '{}:weblab:active:{}'.format(self.key_base, session_id)
         for name in ('back', 'last_poll', 'max_date', 'username', 'username-unique', 'data', 
-                        'exited', 'locale', 'full_name'):
+                        'exited', 'locale', 'full_name', 'experiment_name', 'category_name',
+                        'experiment_id'):
             pipeline.hget(key, name)
 
         (back, last_poll, max_date, username, 
-        username_unique, data, exited, locale, full_name) = pipeline.execute()
+        username_unique, data, exited, locale, full_name,
+        experiment_name, category_name, experiment_id) = pipeline.execute()
 
         if max_date is not None:
             return CurrentUser(session_id=session_id, back=back, last_poll=float(last_poll),
                                max_date=float(max_date), username=username,
                                username_unique=username_unique,
                                data=json.loads(data), exited=json.loads(exited), 
-                               locale=json.loads(locale), full_name=json.loads(full_name))
+                               locale=json.loads(locale), full_name=json.loads(full_name),
+                               experiment_name=json.loads(experiment_name),
+                               category_name=json.loads(category_name),
+                               experiment_id=json.loads(experiment_id))
 
         return self.get_expired_user(session_id)
 
     def get_expired_user(self, session_id):
         pipeline = self.client.pipeline()
         key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
-        for name in 'back', 'max_date', 'username', 'username-unique', 'data', 'locale', 'full_name':
+        for name in ('back', 'max_date', 'username', 'username-unique', 'data', 'locale', 
+                     'full_name', 'experiment_name', 'category_name', 'experiment_id'):
             pipeline.hget(key, name)
 
-        back, max_date, username, username_unique, data, locale, full_name = pipeline.execute()
+        (back, max_date, username, username_unique, data, locale, 
+         full_name, experiment_name, category_name, experiment_id) = pipeline.execute()
 
         if max_date is not None:
             return ExpiredUser(session_id=session_id, back=back, max_date=float(max_date),
                                username=username, username_unique=username_unique,
                                data=json.loads(data), 
                                locale=json.loads(locale),
-                               full_name=json.loads(full_name))
+                               full_name=json.loads(full_name),
+                               experiment_name=json.loads(experiment_name),
+                               category_name=json.loads(category_name),
+                               experiment_id=json.loads(experiment_id))
 
         return AnonymousUser()
 
@@ -1322,6 +1379,9 @@ class _RedisManager(object):
         pipeline.hset(key, "data", json.dumps(expired_user.data))
         pipeline.hset(key, "locale", json.dumps(expired_user.locale))
         pipeline.hset(key, "full_name", json.dumps(expired_user.full_name))
+        pipeline.hset(key, "experiment_name", json.dumps(expired_user.experiment_name))
+        pipeline.hset(key, "category_name", json.dumps(expired_user.category_name))
+        pipeline.hset(key, "experiment_id", json.dumps(expired_user.experiment_id))
 
         # During half an hour after being created, the user is redirected to
         # the original URL. After that, every record of the user has been deleted

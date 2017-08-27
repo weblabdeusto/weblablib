@@ -295,7 +295,9 @@ class BaseSessionWebLabTest(BaseWebLabTest):
         self.client.__exit__(None, None, None)
         super(BaseSessionWebLabTest, self).tearDown()
 
-    def new_user(self, name='Jim Smith', username='jim.smith', username_unique='jim.smith@labsland', assigned_time=300, back='http://weblab.deusto.es', language='en'):
+    def new_user(self, name='Jim Smith', username='jim.smith', username_unique='jim.smith@labsland', 
+                 assigned_time=300, back='http://weblab.deusto.es', language='en',
+                 experiment_name='mylab', category_name='Lab experiments'):
         assigned_time = float(assigned_time)
 
         start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
@@ -309,6 +311,8 @@ class BaseSessionWebLabTest(BaseWebLabTest):
                 'request.full_name': name,
                 'request.username.unique': username_unique,
                 'request.locale': language,
+                'request.experiment_id.experiment_name': experiment_name,
+                'request.experiment_id.category_name': category_name,
             },
             'back': back,
         }
@@ -369,6 +373,10 @@ class UserTest(BaseSessionWebLabTest):
 
         self.assertEquals(weblablib.weblab_user.session_id, session_id1)
         self.assertEquals(weblablib.weblab_user.locale, 'es')
+        self.assertEquals(weblablib.weblab_user.full_name, 'Jim Smith')
+        self.assertEquals(weblablib.weblab_user.experiment_name, 'mylab')
+        self.assertEquals(weblablib.weblab_user.category_name, 'Lab experiments')
+        self.assertEquals(weblablib.weblab_user.experiment_id, 'mylab@Lab experiments')
 
         task_id = response.split('@@task@@')[1]
 
@@ -456,6 +464,12 @@ class UserTest(BaseSessionWebLabTest):
         self.assertIn(session_id1, str(weblablib.weblab_user))
         with self.assertRaises(NotImplementedError):
             weblablib.weblab_user.data = {}
+        self.assertEquals(weblablib.weblab_user.locale, 'es')
+        self.assertEquals(weblablib.weblab_user.full_name, 'Jim Smith')
+        self.assertEquals(weblablib.weblab_user.experiment_name, 'mylab')
+        self.assertEquals(weblablib.weblab_user.category_name, 'Lab experiments')
+        self.assertEquals(weblablib.weblab_user.experiment_id, 'mylab@Lab experiments')
+
 
     def test_status_concrete_time_left(self):
         # New user, with 3 seconds

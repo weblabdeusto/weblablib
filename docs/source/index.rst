@@ -29,6 +29,7 @@ If you are familiar with Flask and with Web development (while not necessarily),
    advanced
    examples
    configuration
+   changelog
 
 
 Indices and tables
