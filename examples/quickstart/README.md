@@ -1,6 +1,6 @@
 # quickstart
 
-This is the code that you find in the quickstart (in the docs)[http://weblablib.readthedocs.org]
+This is the code that you find in the quickstart (in the docs)[http://weblablib.readthedocs.org/en/stable/]
 
 ## step1
 
