@@ -180,7 +180,7 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
 
     def test_callback_initial_url(self):
         self.weblab._initial_url = None
-        
+
         with StdWrap():
             with self.app.test_client() as client:
                 result = self.get_text(client.get('/callback/session.not.found'))
@@ -211,12 +211,19 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
             url = url_for('weblab_poll_url', session_id='does.not.exist')
             result = self.get_json(client.get(url))
             self.assertIn("Different session", result['reason'])
-            
+
             with client.session_transaction() as sess:
                 sess[self.weblab._session_id_name] = 'does.not.exist'
 
             result = self.get_json(client.get(url))
             self.assertIn("Not found", result['reason'])
+
+    def test_logout_url(self):
+        with self.app.test_client() as client:
+            client.get('/lab/')
+            url = url_for('weblab_logout_url', session_id='does.not.exist')
+            result = self.get_json(client.get(url))
+            self.assertIn("Different session", result['reason'])
 
     def test_poll_script(self):
         with self.app.test_client() as client:
@@ -247,6 +254,18 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
             }
             rv = client.post('/weblab/sessions/{}'.format('does.not.exist'), data=json.dumps(request_data), headers=self.auth_headers)
             self.assertIn("Not found", self.get_json(rv)['message'])
+
+class SimpleNoTimeoutUnauthenticatedTest(BaseWebLabTest):
+    def get_config(self):
+        config = super(SimpleNoTimeoutUnauthenticatedTest, self).get_config()
+        config['WEBLAB_TIMEOUT'] = 0
+        return config
+
+    def test_poll_script_timeout(self):
+        with self.app.test_client() as client:
+            client.get('/lab/')
+            result = render_template_string("{{ weblab_poll_script() }}")
+            self.assertIn('timeout is 0', result)
 
 class UnauthorizedLinkSimpleTest(BaseWebLabTest):
     def get_config(self):
@@ -357,7 +376,8 @@ class UserTest(BaseSessionWebLabTest):
             weblablib.weblab_user.update_data()
             weblablib.weblab_user.data = {'foo': 'bar'}
 
-        return render_template_string("@@task@@%s@@task@@{{ weblab_poll_script() }}" % task.task_id)
+        return render_template_string("""@@task@@%s@@task@@{{ weblab_poll_script() }}
+            {{ weblab_poll_script(logout_on_close=True, callback='myfunc') }}""" % task.task_id)
 
     def task(self):
         self.counter += 1
@@ -496,7 +516,7 @@ class UserTest(BaseSessionWebLabTest):
         launch_url1, session_id1 = self.new_user(assigned_time=3)
 
         self.client.get(launch_url1, follow_redirects=True)
-        self.client.get('/logout')
+        self.client.get(url_for('weblab_logout_url', session_id=session_id1))
         
         should_finish = self.status()['should_finish']
 

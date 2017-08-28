@@ -317,6 +317,15 @@ class WebLab(object):
             poll()
             return jsonify(success=True)
 
+        @self._app.route(self._callback_url + '/<session_id>/logout')
+        def weblab_logout_url(session_id):
+            # CSRF would be useful; but we don't really need it in this case
+            # given that the session_id is already secret, random and unique.
+            if session.get(self._session_id_name) != session_id:
+                return jsonify(success=False, reason="Different session identifier")
+            logout()
+            return jsonify(success=True)
+
         self._app.after_request(_update_weblab_user_data)
 
         #
@@ -348,24 +357,47 @@ class WebLab(object):
             if key not in self._app.config:
                 raise InvalidConfigError("Invalid configuration. Missing {}".format(key))
 
-        def weblab_poll_script():
+        def weblab_poll_script(logout_on_close=False, callback=None):
             """
             Create a HTML script that calls poll automatically.
             """
+            if self.timeout <= 0:
+                return Markup("<!-- timeout is 0 or negative; no script -->")
+
             weblab_timeout = int(1000 * self.timeout / 2)
             session_id = _current_session_id()
-            if session_id:
-                return Markup("""<script>
+            if not session_id:
+                return Markup("<!-- session_id not found; no script -->")
+
+            if logout_on_close:
+                logout_code = """
+                $(window).bind("beforeunload", function() {
+                    $.get("%(url)s");
+                });
+                """ % dict(url=url_for('weblab_logout_url', session_id=session_id))
+            else:
+                logout_code = ""
+
+            if callback:
+                callback_code = "{}();".format(callback)
+            else:
+                callback_code = ""
+
+            return Markup("""<script>
                 var WEBLAB_TIMEOUT = null;
                 if (window.jQuery !== undefined) {
                     WEBLAB_TIMEOUT = setInterval(function () {
                         $.get("%(url)s").done(function(result) {
-                            if(!result.success)
+                            if(!result.success) {
                                 clearInterval(WEBLAB_TIMEOUT);
+                                %(callback_code)s
+                            }
                         }).fail(function() {
                             clearInterval(WEBLAB_TIMEOUT);
+                            %(callback_code)s
                         });
-                    }, %(timeout)s )
+                    }, %(timeout)s );
+                    %(logout_code)s
                 } else {
                     var msg = "weblablib error: jQuery not loaded BEFORE {{ weblab_poll_script() }}. Can't poll";
                     if (console && console.error) {
@@ -376,8 +408,9 @@ class WebLab(object):
                         alert(msg);
                     }
                 }
-                </script>""" % dict(timeout=weblab_timeout, url=url_for('weblab_poll_url', session_id=session_id)))
-            return Markup("<!-- session_id not found; no script -->")
+                </script>""" % dict(timeout=weblab_timeout, url=url_for('weblab_poll_url', session_id=session_id),
+                                    logout_code=logout_code, callback_code=callback_code))
+
 
         @self._app.context_processor
         def weblab_context_processor():
