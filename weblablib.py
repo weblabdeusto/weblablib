@@ -314,6 +314,9 @@ class WebLab(object):
             if not self._redis_manager.session_exists(session_id):
                 return jsonify(success=False, reason="Not found")
 
+            if not weblab_user.active:
+                return jsonify(success=False, reason="User inactive")
+
             poll()
             return jsonify(success=True)
 
