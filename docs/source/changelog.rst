@@ -13,6 +13,7 @@ Version 0.3
  * Added ``current_task`` that can be called inside a task to get the ``task_id`` or update data.
  * Added ``current_task.data`` and ``current_task.update_data`` so as to update JSON-friendly data to measure the progress of the task.
  * Added ``@weblab.user_loader``. If set, you can later run say ``user = weblab_user.user``, and it returns a user (e.g., from your database)
+ * Supported arguments on ``{{ weblab_poll_script() }}``: ``logout_on_close``, which logs out when you close the current window (by default ``False``); and ``callback`` if you want to be notified when the time has passed or an error occurs.
 
 Version 0.2
 -----------

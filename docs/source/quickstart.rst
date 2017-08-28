@@ -575,16 +575,14 @@ However, if you want to make this process faster, you can implement a method suc
        return jsonify(result="ok")
 
 This way, you can create in HTML a code that actively tells in a faster way to WebLab-Deusto that the user
-is finished. You can also call this automatically when the web browser closes with some JavaScript code like:
+is finished.
 
-.. code-block:: javascript
+You can also call this automatically when the web browser closes or moves to another link by adding this
+parameter to ``weblab_poll_script``:
 
-   $(document).ready(function()
-   {
-       $(window).bind("beforeunload", function() {
-           $.get("{{ url_for('logout') }}");
-       });
-   });
+.. code-block:: html
+
+   {{ weblab_poll_script(logout_on_close=True) }}
 
 Additionally, by default, **weblablib** installs a code that for any call in your Flask app, it will call
 automatically ``poll``. You can disable this by configuring ``WEBLAB_AUTOPOLL`` to ``False`` in the
