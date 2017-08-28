@@ -153,10 +153,11 @@ class WebLabApiTest(BaseWebLabTest):
             self.assertIn("no username", result['error_messages'][0])
 
     def test_weblab_test_with_wrong_auth(self):
-        with self.app.test_client() as client:
-            result = self.get_json(client.get('/weblab/sessions/test', headers=self.wrong_auth_headers))
-            self.assertEquals(result['valid'], False)
-            self.assertIn("wrong username", result['error_messages'][0])
+        with StdWrap():
+            with self.app.test_client() as client:
+                result = self.get_json(client.get('/weblab/sessions/test', headers=self.wrong_auth_headers))
+                self.assertEquals(result['valid'], False)
+                self.assertIn("wrong username", result['error_messages'][0])
 
     def test_weblab_test_with_right_auth(self):
         with self.app.test_client() as client:
@@ -164,9 +165,10 @@ class WebLabApiTest(BaseWebLabTest):
             self.assertEquals(result['valid'], True)
 
     def test_weblab_status_with_wrong_auth(self):
-        with self.app.test_client() as client:
-            result = self.get_text(client.get('/weblab/sessions/<invalid>/status', headers=self.wrong_auth_headers))
-            self.assertIn("seem to be", result)
+        with StdWrap():
+            with self.app.test_client() as client:
+                result = self.get_text(client.get('/weblab/sessions/<invalid>/status', headers=self.wrong_auth_headers))
+                self.assertIn("seem to be", result)
 
 class SimpleUnauthenticatedTest(BaseWebLabTest):
     def test_token(self):
@@ -759,11 +761,18 @@ class CLITest(BaseWebLabTest):
 
     def test_other_cli(self):
         runner = CliRunner()
-        
+
         result = runner.invoke(self.app.cli, ["clean-expired-users"])
         self.assertEquals(result.exit_code, 0)
 
         result = runner.invoke(self.app.cli, ["run-tasks"])
+        self.assertEquals(result.exit_code, 0)
+
+    def test_loop_cli(self):
+        runner = CliRunner()
+
+        weblablib._TESTING_LOOP = True
+        result = runner.invoke(self.app.cli, ["loop"])
         self.assertEquals(result.exit_code, 0)
 
 class CLIFailTest(BaseWebLabTest):

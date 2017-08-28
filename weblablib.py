@@ -38,6 +38,7 @@ import time
 import atexit
 import base64
 import pickle
+import signal
 import datetime
 import threading
 import traceback
@@ -206,11 +207,13 @@ class WebLab(object):
         }
 
         self._task_threads = []
+        self._stopping = False
 
         if app is not None:
             self.init_app(app)
 
     def _cleanup(self):
+        self._stopping = True
         old_threads = []
         for task_thread in self._task_threads:
             task_thread.stop()
@@ -439,6 +442,14 @@ class WebLab(object):
                 external processes.
                 """
                 self.run_tasks()
+
+            @self._app.cli.command('loop')
+            @click.option('--threads', default=5, help="Number of threads")
+            def loop(threads):
+                """
+                Run planned tasks and clean expired users, permanently.
+                """
+                self.loop(int(threads))
 
             @self._app.cli.command('fake-new-user')
             @click.option('--name', default='John Smith', help="First and last name")
@@ -774,7 +785,7 @@ class WebLab(object):
     def user_loader(self, func):
         """
         Create a user loader. It must be a function such as:
-            
+
         @weblab.user_loader
         def user_loader(username_unique):
             return User.query.get(weblab_username=username_unique)
@@ -786,14 +797,57 @@ class WebLab(object):
 
         user_db = weblab_user.user
 
-        and internally it will call the user_loader to obtain the 
-        user associated to this current user. 
+        and internally it will call the user_loader to obtain the
+        user associated to this current user.
         Otherwise, weblab_user.user will return None.
         """
         if self._user_loader is not None:
             raise ValueError("A user_loader has already been registered")
 
         self._user_loader = func
+
+    def loop(self, threads):
+        """
+        Launch N threads that run tasks and clean expired users continuously.
+        """
+        print("Running {} threads".format(threads))
+        loop_threads = []
+
+        def stop_threads(*args):
+            if not self._stopping:
+                print("Waiting...")
+            self._stopping = True
+            for loop_thread in loop_threads:
+                loop_thread.stop()
+
+            for loop_thread in loop_threads:
+                loop_thread.join()
+
+        signal.signal(signal.SIGTERM, stop_threads)
+
+        for number in range(1, threads + 1):
+            task_thread = _TaskRunner(number, self, self._app)
+            loop_threads.append(task_thread)
+            task_thread.start()
+
+            cleaner_thread = _CleanerThread(weblab=self, app=self._app, n=number)
+            loop_threads.append(cleaner_thread)
+            cleaner_thread.start()
+
+        global _TESTING_LOOP
+
+        while True:
+            try:
+                time.sleep(0.2)
+            except:
+                break
+
+            if self._stopping or _TESTING_LOOP:
+                break
+
+        stop_threads()
+
+_TESTING_LOOP = False
 
 ##################################################################################################################
 #
@@ -2088,10 +2142,10 @@ class _CleanerThread(threading.Thread):
 
     _instances = []
 
-    def __init__(self, weblab, app):
+    def __init__(self, weblab, app, n=1):
         super(_CleanerThread, self).__init__()
         self.app = app
-        self.name = "WebLabCleaner"
+        self.name = "WebLabCleaner-{}".format(n)
         self.weblab = weblab
         self.daemon = True
         self._stopping = False
@@ -2117,7 +2171,6 @@ class _CleanerThread(threading.Thread):
 
                 if self._stopping:
                     break
-
 
 def _cleanup_all():
     all_threads = _CleanerThread._instances + _TaskRunner._instances

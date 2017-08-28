@@ -48,7 +48,7 @@ Or asynchronously (common when it's tasks) and play with the ``WebLabTask`` obje
 
    # a string 'submitted', 'running' or 'failed'/'done' if finished.
    task.status
-    
+
    task.submitted  # bool: not yet started by a worker
    task.running    # bool: started by a worker, not yet finished
    task.done       # bool: finished successfully
@@ -241,6 +241,22 @@ Another approach (which is indeed cleaner) is to run no thread, and run the task
 .. code-block:: shell
 
    $ export FLASK_APP=laboratory.py
+   $ flask loop
+
+or:
+
+.. code-block:: shell
+
+   $ export FLASK_APP=laboratory.py
+   $ flask loop --threads 10
+
+This way, you'll have a process running 10 threads the ``run-tasks`` and ``clean-expired-threads`` tasks continuously.
+
+Another alternative is to run each process separately and per task:
+
+.. code-block:: shell
+
+   $ export FLASK_APP=laboratory.py
    $ flask clean-expired-users
 
 And in another process:
@@ -250,7 +266,7 @@ And in another process:
    $ export FLASK_APP=laboratory.py
    $ flask run-tasks
 
-These two processes end immediately. You can run them in a loop outside, use ``cron`` or similar tools or so.
+These two processes end immediately. You can run them in a loop outside in a shell, use ``cron`` or similar tools or so.
 
 This way, the ``gunicorn`` processes will only manage web requests, and the external processes will run the tasks and clean expired users.
 
