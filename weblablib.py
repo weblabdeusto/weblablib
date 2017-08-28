@@ -194,6 +194,7 @@ class WebLab(object):
         self._redirection_on_forbiden = None
         self._template_on_forbiden = None
         self._cleaner_thread = None
+        self._user_loader = None
 
         self._on_start = None
         self._on_dispose = None
@@ -728,11 +729,35 @@ class WebLab(object):
             tasks.append(WebLabTask(self, task_id))
         return tasks
 
-    def create_token(self): # pylint: disable=no-self-use
+    def create_token(self, size=None): # pylint: disable=no-self-use
         """
         Create a URL-safe random unique token in a safe way.
         """
-        return _create_token()
+        return _create_token(size)
+
+    def user_loader(self, func):
+        """
+        Create a user loader. It must be a function such as:
+            
+        @weblab.user_loader
+        def user_loader(username_unique):
+            return User.query.get(weblab_username=username_unique)
+
+        Or similar. Internally, you can also work with weblab_user,
+        for creating the object if not present or similar.
+
+        With this, you can later do:
+
+        user_db = weblab_user.user
+
+        and internally it will call the user_loader to obtain the 
+        user associated to this current user. 
+        Otherwise, weblab_user.user will return None.
+        """
+        if self._user_loader is not None:
+            raise ValueError("A user_loader has already been registered")
+
+        self._user_loader = func
 
 ##################################################################################################################
 #
@@ -909,6 +934,23 @@ class CurrentUser(WebLabUser):
                            data=self._data, locale=self._locale, full_name=self._full_name,
                            experiment_name=self._experiment_name, category_name=self._category_name,
                            experiment_id=self._experiment_id)
+
+    @property
+    def user(self):
+        user_loader = _current_weblab()._user_loader
+        if user_loader is None:
+            return None
+        
+        try:
+            user = user_loader(self.username_unique)
+        except:
+            raise
+        else:
+            # Maybe in the future we should cache results so 
+            # no every weblab_user.user becomes a call to 
+            # the database? The main issue is with tasks or
+            # long-standing processes
+            return user
 
     @property
     def active(self):
@@ -1914,8 +1956,10 @@ def _to_timestamp(dtime):
 def _current_timestamp():
     return float(_to_timestamp(datetime.datetime.now()))
 
-def _create_token():
-    tok = os.urandom(32)
+def _create_token(size=None):
+    if size is None:
+        size = 32
+    tok = os.urandom(size)
     safe_token = base64.urlsafe_b64encode(tok).strip().replace(b'=', b'').replace(b'-', b'_')
     safe_token = safe_token.decode('utf8')
     return safe_token

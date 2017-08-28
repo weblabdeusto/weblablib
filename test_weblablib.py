@@ -569,6 +569,56 @@ class TaskFailTest(BaseSessionWebLabTest):
         self.assertIn('zero', task.error['message'])
         self.assertEqual(task.error['class'], 'ZeroDivisionError')
 
+class MyLabUser(object):
+    def __init__(self, username_unique, username):
+        self.username_unique = username_unique
+        self.username = username
+
+class LoadUserTest(BaseSessionWebLabTest):
+    def test_load_no_loader(self):
+        launch_url1, session_id1 = self.new_user()
+        response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+
+        user = weblablib.weblab_user.user
+        self.assertIsNone(user)
+
+    def test_load_simple(self):
+        @self.weblab.user_loader
+        def user_loader(username_unique):
+            return MyLabUser(username_unique, weblablib.weblab_user.username)
+
+        launch_url1, session_id1 = self.new_user(username='user1', username_unique='unique1')
+        response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+        user = weblablib.weblab_user.user
+        self.assertIsInstance(user, MyLabUser)
+        self.assertEquals(user.username, 'user1')
+        self.assertEquals(user.username_unique, 'unique1')
+
+        user2 = weblablib.weblab_user.user
+        self.assertIsInstance(user2, MyLabUser)
+        self.assertEquals(user2.username, 'user1')
+        self.assertEquals(user2.username_unique, 'unique1')
+
+        launch_url2, session_id2 = self.new_user(username='user2', username_unique='unique2')
+        response = self.get_text(self.client.get(launch_url2, follow_redirects=True))
+        user3 = weblablib.weblab_user.user
+        self.assertIsInstance(user3, MyLabUser)
+        self.assertEquals(user3.username, 'user2')
+        self.assertEquals(user3.username_unique, 'unique2')
+
+    def test_user_loader_fail(self):
+        @self.weblab.user_loader
+        def user_loader(username_unique):
+            raise Exception("Random error")
+
+        launch_url1, session_id1 = self.new_user(username='user1', username_unique='unique1')
+        response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+        with self.assertRaises(Exception) as cm:
+            weblablib.weblab_user.user
+        
+        self.assertIn("Random error", str(cm.exception))
+
+
 class LongTaskTest(BaseSessionWebLabTest):
 
     def get_config(self):
@@ -860,6 +910,21 @@ class WebLabSetupErrorsTest(unittest.TestCase):
                     pass
         finally:
             self.weblab._cleanup()
+
+    def test_user_loader_duplicated(self):
+        self._create_weblab()
+
+        try:
+            @self.weblab.user_loader
+            def user_loader(username_unique):
+                pass
+            
+            with self.assertRaises(ValueError):
+                @self.weblab.user_loader
+                def user_loader2(username_unique):
+                    pass
+        finally:
+            self.weblab._cleanup()       
 
     def test_on_start_duplicated(self):
         self._create_weblab()

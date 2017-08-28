@@ -145,6 +145,64 @@ rely on the Flask session configuration variables, such as:
                                   one.
 ================================= =========================================
 
+Using database users
+--------------------
+
+In some cases, you might want to have a local database in your laboratory, and users represented there.
+
+For example, sometimes you might want to create a ``folder``, or a ``secret`` for that user, randomly
+generated and stored somewhere so the next time the user comes in, he sees the same thing. Also, there
+is a function called ``create_token`` in the weblab object to create random secrets in a secure way
+and URL-friendly (so you can put them in a query or similar, or even as a folder name or similar).
+
+To do this, in the ``on_start`` method you can create the user if it doesn't exist. This example 
+uses `Flask-SQLAlchemy <http://flask-sqlalchemy.pocoo.org/>`_:
+
+.. code-block:: python
+
+   # Using Flask-SQLAlchemy ( http://flask-sqlalchemy.pocoo.org/ )
+   from .models import LabUser
+   from mylab import db
+
+   @weblab.on_start
+   def start(client_data, server_data):
+       user = LabUser.query.filter_by(username_unique=username_unique).first()
+       if user is None:
+          # first time, assign a folder
+          folder_name = weblab.create_token()
+
+          # Lab configuration
+          programs_folder = current_app.config['PROGRAMS_FOLDER']
+          os.mkdir(programs_name)
+
+          # Add the user
+          user = LabUser(username=weblab_user.username, 
+                         username_unique=weblab_user.username_unique,
+                         folder=folder_name)
+          db.session.add(user)
+          db.session.commit()
+
+And then there is a ``user_loader`` function for loading the user, as well
+as a ``weblab_user.user`` object which internally uses that load_user:
+
+.. code-block:: python
+
+   # Using Flask-SQLAlchemy ( http://flask-sqlalchemy.pocoo.org/ )
+   from .models import LabUser
+
+   @weblab.user_loader
+   def load_user(username_unique):
+       return LabUser.query.filter_by(username_unique=username_unique).first()
+
+    @app.route('/files')
+    @requires_active
+    def files():
+        user_folder = weblab_user.user.folder
+        return jsonify(files=os.listdir(user_folder))
+
+You can use this in different ways: you can create your own class and use it
+relying on a database, or you can use Redis or similar.
+
 Forbidden page
 --------------
 
