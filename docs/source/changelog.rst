@@ -3,6 +3,10 @@
 Changelog
 =========
 
+Version 0.4
+-----------
+ * Added ``WEBLAB_NO_THREAD`` which is equivalent to ``WEBLAB_AUTOCLEAN_THREAD=False`` and ``WEBLAB_TASK_THREADS_PROCESS=0``.
+
 Version 0.3
 -----------
 

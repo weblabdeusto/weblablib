@@ -60,5 +60,8 @@ The following are the configuration variables of **weblablib**:
 ``WEBLAB_TASK_THREADS_PROCESS``   By default ``3``, it is the number of threads
                                   in each **weblablib** process running tasks
                                   submitted by user.
+``WEBLAB_NO_THREAD``              Equivalent to ``WEBLAB_AUTOCLEAN_THREAD=False``
+                                  and ``WEBLAB_TASK_THREADS_PROCESS=0``. If you
+                                  use it, make sure you run ``flask loop``
 ================================= =========================================
 

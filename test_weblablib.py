@@ -879,6 +879,38 @@ class WebLabSetupErrorsTest(unittest.TestCase):
         self.assertIn('different app', str(cm.exception))
         weblab._cleanup()
 
+    def test_app_no_thread_and_auto_clean(self):
+        app = Flask(__name__)
+        app.config.update({
+            'WEBLAB_USERNAME': 'weblabdeusto',
+            'WEBLAB_PASSWORD': 'password',
+            'SERVER_NAME': 'localhost:5000',
+            'WEBLAB_NO_THREAD': True,
+            'WEBLAB_AUTOCLEAN_THREAD': True,
+        })
+        weblab = weblablib.WebLab()
+        with self.assertRaises(ValueError) as cm:
+            weblab.init_app(app)
+
+        self.assertIn('incompatible with WEBLAB_AUTOCLEAN_THREAD', str(cm.exception))
+        weblab._cleanup()
+
+    def test_app_no_thread_and_task_threads(self):
+        app = Flask(__name__)
+        app.config.update({
+            'WEBLAB_USERNAME': 'weblabdeusto',
+            'WEBLAB_PASSWORD': 'password',
+            'SERVER_NAME': 'localhost:5000',
+            'WEBLAB_NO_THREAD': True,
+            'WEBLAB_TASK_THREADS_PROCESS': 5,
+        })
+        weblab = weblablib.WebLab()
+        with self.assertRaises(ValueError) as cm:
+            weblab.init_app(app)
+
+        self.assertIn('incompatible with WEBLAB_TASK_THREADS_PROCESS', str(cm.exception))
+        weblab._cleanup()
+
     def test_app_two_weblabs_same_app(self):
         app = Flask(__name__)
         app.config.update({

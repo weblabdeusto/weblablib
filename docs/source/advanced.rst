@@ -236,7 +236,7 @@ So if you run:
 
 For example, you'll be running 10 processes, and each of them 3 threads for tasks (30) and 1 thread for cleaning expired sessions. You can reduce the number of threads per process by changing ``WEBLAB_TASK_THREADS_PROCESS``.
 
-Another approach (which is indeed cleaner) is to run no thread, and run the tasks, etc. outside. To do this, you can configure ``WEBLAB_TASK_THREADS_PROCESS`` to ``0``,  ``WEBLAB_AUTOCLEAN_THREAD`` to ``False``, and then run in parallel:
+Another approach (which is indeed cleaner) is to run no thread, and run the tasks, etc. outside. To do this, you can configure ``WEBLAB_NO_THREAD=False`` (which is equivalent to ``WEBLAB_TASK_THREADS_PROCESS=0``,  ``WEBLAB_AUTOCLEAN_THREAD=False``), and then run in parallel:
 
 .. code-block:: shell
 

@@ -154,6 +154,9 @@ class ConfigurationKeys(object):
     # for running threads.
     WEBLAB_TASK_THREADS_PROCESS = 'WEBLAB_TASK_THREADS_PROCESS'
 
+    # Equivalent for WEBLAB_AUTOCLEAN_THREAD=False and WEBLAB_TASK_THREADS_PROCESS=0
+    WEBLAB_NO_THREAD = 'WEBLAB_NO_THREAD'
+
 #############################################################
 #
 # WebLab-Deusto Flask extension:
@@ -561,16 +564,24 @@ class WebLab(object):
 
                     self._app.config['SERVER_NAME'] = server_name
 
-        if self._app.config.get('WEBLAB_AUTOCLEAN_THREAD', True):
-            self._cleaner_thread = _CleanerThread(self, self._app)
-            self._cleaner_thread.start()
+        if self._app.config.get('WEBLAB_NO_THREAD', False):
+            if self._app.config.get('WEBLAB_AUTOCLEAN_THREAD', False):
+                raise ValueError("WEBLAB_NO_THREAD=True is incompatible with WEBLAB_AUTOCLEAN_THREAD=True")
 
-        threads_per_process = self._app.config.get('WEBLAB_TASK_THREADS_PROCESS', 3)
-        if threads_per_process > 0: # If set to 0, no thread is running
-            for number in six.moves.range(threads_per_process):
-                task_thread = _TaskRunner(number, self, self._app)
-                self._task_threads.append(task_thread)
-                task_thread.start()
+            if self._app.config.get('WEBLAB_TASK_THREADS_PROCESS', 0) > 0:
+                raise ValueError("WEBLAB_NO_THREAD=True is incompatible with WEBLAB_TASK_THREADS_PROCESS > 0")
+
+        else:
+            if self._app.config.get('WEBLAB_AUTOCLEAN_THREAD', True):
+                self._cleaner_thread = _CleanerThread(self, self._app)
+                self._cleaner_thread.start()
+
+            threads_per_process = self._app.config.get('WEBLAB_TASK_THREADS_PROCESS', 3)
+            if threads_per_process > 0: # If set to 0, no thread is running
+                for number in six.moves.range(threads_per_process):
+                    task_thread = _TaskRunner(number, self, self._app)
+                    self._task_threads.append(task_thread)
+                    task_thread.start()
 
         self._initialized = True
 
