@@ -5,9 +5,38 @@ Changelog
 
 Version 0.4
 -----------
+
+General
+^^^^^^^
+
  * Added ``WEBLAB_NO_THREAD`` which is equivalent to ``WEBLAB_AUTOCLEAN_THREAD=False`` and ``WEBLAB_TASK_THREADS_PROCESS=0``.
- * When running ``flask fake-new-user`` the default behavior is to open a web browser. ``--open-browser`` removed, and a new ``--dont-open-browser`` flag is available.
- * Added ``flask loop --reload``. If you change the source code of your application, it will restart the process automatically.
+
+WebSockets
+^^^^^^^^^^
+
+ * Flask-SocketIO support through helpers
+
+CLI changes
+^^^^^^^^^^^
+
+  * Similarly to other Flask projects, all the ``weblablib`` commands are in a single command group called ``weblab``. This way, in case of using multiple libraries which include their own commands (such as Flask-Migrate or Flask-Assets), the number of commands in the ``--help`` are low, and there is a low chance of collision (e.g., you might be using a celery-like system that also has a ``run-tasks`` command or a ``loop`` command). Therefore, since this version:
+
+ 
+.. tabularcolumns:: |p{6.5cm}|p{8.5cm}|
+
+================================= =========================================
+**Before weblablib 0.4**          **Since weblablib 0.4**
+================================= =========================================
+``flask fake-new-user``           ``flask weblab fake new``
+``flask fake-dispose``            ``flask weblab fake dispose``
+``flask fake-status``             ``flask weblab fake status``
+``flask loop``                    ``flask weblab loop``
+``flask run-tasks``               ``flask weblab run-tasks``
+``flask clean-expired-users``     ``flask weblab clean-expired-users``
+================================= =========================================
+
+ * When running ``flask weblab fake new`` the default behavior is to open a web browser. ``--open-browser`` removed, and a new ``--dont-open-browser`` flag is available.
+ * Added ``flask weblab loop --reload``. If you change the source code of your application, it will restart the process automatically.
 
 Version 0.3
 -----------

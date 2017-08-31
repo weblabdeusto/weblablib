@@ -241,14 +241,14 @@ Another approach (which is indeed cleaner) is to run no thread, and run the task
 .. code-block:: shell
 
    $ export FLASK_APP=laboratory.py
-   $ flask loop
+   $ flask weblab loop
 
 or:
 
 .. code-block:: shell
 
    $ export FLASK_APP=laboratory.py
-   $ flask loop --threads 10
+   $ flask weblab loop --threads 10
 
 
 This way, you'll have a process running 10 threads the ``run-tasks`` and ``clean-expired-threads`` tasks continuously.
@@ -258,21 +258,21 @@ The command has a flag ``--reload`` and ``--no-reload``. With it, whenever you c
 .. code-block:: shell
 
    $ export FLASK_APP=laboratory.py
-   $ flask loop --reload
+   $ flask weblab loop --reload
 
 Another alternative is to run each process separately and per task:
 
 .. code-block:: shell
 
    $ export FLASK_APP=laboratory.py
-   $ flask clean-expired-users
+   $ flask weblab clean-expired-users
 
 And in another process:
 
 .. code-block:: shell
 
    $ export FLASK_APP=laboratory.py
-   $ flask run-tasks
+   $ flask weblab run-tasks
 
 These two processes end immediately. You can run them in a loop outside in a shell, use ``cron`` or similar tools or so.
 

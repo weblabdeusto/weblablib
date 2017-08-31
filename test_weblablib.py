@@ -726,26 +726,26 @@ class CLITest(BaseWebLabTest):
         runner = CliRunner()
 
         with runner.isolated_filesystem():
-            result = runner.invoke(self.app.cli, ["fake-new-user", "--dont-open-browser"])
+            result = runner.invoke(self.app.cli, ["weblab", "fake", "new", "--dont-open-browser"])
             self.assertEquals(result.exit_code, 0)
 
-            result = runner.invoke(self.app.cli, ["fake-status"])
+            result = runner.invoke(self.app.cli, ["weblab", "fake", "status"])
             self.assertIn("Should finish: 5", result.output)
             self.assertEquals(result.exit_code, 0)
 
-            result = runner.invoke(self.app.cli, ["fake-dispose"])
+            result = runner.invoke(self.app.cli, ["weblab", "fake", "dispose"])
             self.assertIn("Deleted", result.output)
             self.assertEquals(result.exit_code, 0)
 
-            result = runner.invoke(self.app.cli, ["fake-dispose"])
+            result = runner.invoke(self.app.cli, ["weblab", "fake", "dispose"])
             self.assertIn("Session not found", result.output)
             self.assertEquals(result.exit_code, 0)
 
-            result = runner.invoke(self.app.cli, ["fake-status"])
+            result = runner.invoke(self.app.cli, ["weblab", "fake", "status"])
             self.assertIn("Session not found", result.output)
             self.assertEquals(result.exit_code, 0)
 
-            result = runner.invoke(self.app.cli, ["fake-new-user", "--dont-open-browser"])
+            result = runner.invoke(self.app.cli, ["weblab", "fake", "new", "--dont-open-browser"])
             self.assertEquals(result.exit_code, 0)
 
             request_data = {
@@ -755,24 +755,24 @@ class CLITest(BaseWebLabTest):
             session_id = session_id_line.strip().split('/')[-1]
             self.weblab._redis_manager._tests_delete_user(session_id)
 
-            result = runner.invoke(self.app.cli, ["fake-dispose"])
+            result = runner.invoke(self.app.cli, ["weblab", "fake", "dispose"])
             self.assertIn("Not found", result.output)
             self.assertEquals(result.exit_code, 0)
 
     def test_other_cli(self):
         runner = CliRunner()
 
-        result = runner.invoke(self.app.cli, ["clean-expired-users"])
+        result = runner.invoke(self.app.cli, ["weblab", "clean-expired-users"])
         self.assertEquals(result.exit_code, 0)
 
-        result = runner.invoke(self.app.cli, ["run-tasks"])
+        result = runner.invoke(self.app.cli, ["weblab", "run-tasks"])
         self.assertEquals(result.exit_code, 0)
 
     def test_loop_cli(self):
         runner = CliRunner()
 
         weblablib._TESTING_LOOP = True
-        result = runner.invoke(self.app.cli, ["loop"])
+        result = runner.invoke(self.app.cli, ["weblab", "loop"])
         self.assertEquals(result.exit_code, 0)
 
 class CLIFailTest(BaseWebLabTest):
@@ -784,7 +784,7 @@ class CLIFailTest(BaseWebLabTest):
         runner = CliRunner()
 
         with runner.isolated_filesystem():
-            result = runner.invoke(self.app.cli, ["fake-new-user", "--dont-open-browser"])
+            result = runner.invoke(self.app.cli, ["weblab", "fake", "new", "--dont-open-browser"])
             self.assertIn("Error processing", result.output)
 
 class WebLabConfigErrorsTest(unittest.TestCase):
@@ -795,7 +795,7 @@ class WebLabConfigErrorsTest(unittest.TestCase):
             self.app = Flask(__name__)
             self.app.config.update(config)
             self.weblab.init_app(self.app)
-        
+
         self.assertIn(message, str(cm.exception))
 
     def test_callback(self):
@@ -846,7 +846,7 @@ class WebLabSetupErrorsTest(unittest.TestCase):
         })
         with StdWrap():
             sysargv = sys.argv
-            sys.argv = list(sys.argv) + [ 'fake-new-user', '--dont-open-browser']
+            sys.argv = list(sys.argv) + [ 'weblab', 'fake', 'new', '--dont-open-browser']
             try:
                 weblab = weblablib.WebLab(app)
             finally:

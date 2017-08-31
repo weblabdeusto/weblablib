@@ -103,7 +103,7 @@ And you can test it using [WebLab-Deusto](https://weblabdeusto.readthedocs.org) 
 ```shell
 
  $ export FLASK_APP=autoapp.py # (or . localrc)
- $ flask fake-new-user --open-browser
+ $ flask weblab fake new --open-browser
 ```
 
 ### Running it for production environments

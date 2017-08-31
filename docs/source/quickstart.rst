@@ -925,16 +925,16 @@ The former is mandatory for the production mode, but the latter is the easiest v
 
    $ export FLASK_DEBUG=1
    $ export FLASK_APP=laboratory.py
-   $ flask fake-new-user
+   $ flask weblab fake new
 
 This fakes a request from WebLab-Deusto, creating a new user. By default, it opens a session your default web browser (check `more information on how thisworks <https://docs.python.org/2/library/webbrowser.html>`_ if it uses a web browser you don't want). You can avoid this by adding ``--dont-open-browser``.
 
-As you see, you will end in http://localhost:5000/ but with a working valid WebLab-Deusto session. ``fake-new-user`` uses some default parameters, that you can change:
+As you see, you will end in http://localhost:5000/ but with a working valid WebLab-Deusto session. ``weblab fake new`` uses some default parameters, that you can change:
 
 .. code-block:: shell
 
-   $ flask fake-new-user --help
-   Usage: flask fake-new-user [OPTIONS]
+   $ flask weblab fake new --help
+   Usage: flask weblab fake new [OPTIONS]
 
      Create a fake WebLab-Deusto user session.
 
@@ -951,22 +951,46 @@ As you see, you will end in http://localhost:5000/ but with a working valid WebL
      --dont-open-browser      Do not open the fake use in a web browser
      --help                   Show this message and exit.
 
+
 So, for example, you could also run:
 
 .. code-block:: shell
 
-   $ flask fake-new-user --name "Homer Simpson" --username hsimpson \
+   $ flask weblab fake new --name "Homer Simpson" --username hsimpson \
                          --username-unique "hsimpson@labsland" \
                          --assigned-time 600 \
                          --back https://en.wikipedia.org/wiki/Homer_Simpson \
                          --locale en
                          --dont-open-browser
 
+.. note::
+
+   If it tells you that the command does not exist:
+
+   .. code-block:: shell
+
+      $ flask weblab fake new
+      Usage: flask [OPTIONS] COMMAND [ARGS]...
+
+      Error: No such command "weblab".
+      $
+
+   It means that there is another error in another layer. For example:
+
+     * You may have forgotten to do the ``export FLASK_APP=laboratory.py`` (quite common)
+     * There might be an error that causes your code to raise an exception. Try to run:
+
+   .. code-block:: shell
+
+      $ python laboratory.py
+
+   to see if there is an unhandled error you're missing.
+
 You can also fake stopping the current session by running:
 
 .. code-block:: shell
 
-   $ flask fake-dispose
+   $ flask weblab fake dispose
 
 It will delete the current session, so in the next ``weblab_user``, it will be already an ``ExpiredUser``.
 
@@ -974,7 +998,7 @@ You can also fake what's the current status as WebLab-Deusto does, contacting yo
 
 .. code-block:: shell
 
-   $ flask fake-status
+   $ flask weblab fake status
 
 Which will return a number indicating when you should contact again, in seconds.
 

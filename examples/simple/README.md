@@ -26,5 +26,5 @@ And you can test it using [WebLab-Deusto](https://weblabdeusto.readthedocs.org) 
 ```shell
 
  $ export FLASK_APP=example.py
- $ flask fake-new-user --open-browser
+ $ flask weblab fake new
 ```
