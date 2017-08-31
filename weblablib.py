@@ -448,11 +448,24 @@ class WebLab(object):
 
             @self._app.cli.command('loop')
             @click.option('--threads', default=5, help="Number of threads")
-            def loop(threads):
+            @click.option('--reload/--no-reload', default=None, help="Reload as code changes. Defaults to whether the app is in FLASK_DEBUG mode")
+            def loop(threads, reload):
                 """
                 Run planned tasks and clean expired users, permanently.
                 """
-                self.loop(int(threads))
+                if reload is None:
+                    reload = current_app.debug
+
+                def run_loop():
+                    if reload:
+                        print("Running with reloader. Don't use this in production mode.")
+                    self.loop(int(threads), reload)
+
+                if reload:
+                    from werkzeug.serving import run_with_reloader
+                    run_with_reloader(run_loop)
+                else:
+                    run_loop()
 
             @self._app.cli.command('fake-new-user')
             @click.option('--name', default='John Smith', help="First and last name")
@@ -815,7 +828,7 @@ class WebLab(object):
 
         self._user_loader = func
 
-    def loop(self, threads):
+    def loop(self, threads, reload):
         """
         Launch N threads that run tasks and clean expired users continuously.
         """
@@ -832,7 +845,8 @@ class WebLab(object):
             for loop_thread in loop_threads:
                 loop_thread.join()
 
-        signal.signal(signal.SIGTERM, stop_threads)
+        if not reload:
+            signal.signal(signal.SIGTERM, stop_threads)
 
         for number in range(1, threads + 1):
             task_thread = _TaskRunner(number, self, self._app)

@@ -250,7 +250,15 @@ or:
    $ export FLASK_APP=laboratory.py
    $ flask loop --threads 10
 
+
 This way, you'll have a process running 10 threads the ``run-tasks`` and ``clean-expired-threads`` tasks continuously.
+
+The command has a flag ``--reload`` and ``--no-reload``. With it, whenever you change something in your code, the process will be automatically restarted. Its default value is the same as ``FLASK_DEBUG`` (so if you're in ``FLASK_DEBUG``, by default it will be run with ``reloader`` while you can change it with ``--no-reload``, and if ``FLASK_DEBUG=0`` or not set, it will not use the reload). You should not use this in production since the reloader kills the process (so if it's in the middle of a task or in the middle of a ``on_dispose`` code, it will literally kill it instead of waiting until it finishes).
+
+.. code-block:: shell
+
+   $ export FLASK_APP=laboratory.py
+   $ flask loop --reload
 
 Another alternative is to run each process separately and per task:
 

@@ -7,6 +7,7 @@ Version 0.4
 -----------
  * Added ``WEBLAB_NO_THREAD`` which is equivalent to ``WEBLAB_AUTOCLEAN_THREAD=False`` and ``WEBLAB_TASK_THREADS_PROCESS=0``.
  * When running ``flask fake-new-user`` the default behavior is to open a web browser. ``--open-browser`` removed, and a new ``--dont-open-browser`` flag is available.
+ * Added ``flask loop --reload``. If you change the source code of your application, it will restart the process automatically.
 
 Version 0.3
 -----------
