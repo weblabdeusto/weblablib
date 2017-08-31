@@ -726,7 +726,7 @@ class CLITest(BaseWebLabTest):
         runner = CliRunner()
 
         with runner.isolated_filesystem():
-            result = runner.invoke(self.app.cli, ["fake-new-user"])
+            result = runner.invoke(self.app.cli, ["fake-new-user", "--dont-open-browser"])
             self.assertEquals(result.exit_code, 0)
 
             result = runner.invoke(self.app.cli, ["fake-status"])
@@ -745,7 +745,7 @@ class CLITest(BaseWebLabTest):
             self.assertIn("Session not found", result.output)
             self.assertEquals(result.exit_code, 0)
 
-            result = runner.invoke(self.app.cli, ["fake-new-user"])
+            result = runner.invoke(self.app.cli, ["fake-new-user", "--dont-open-browser"])
             self.assertEquals(result.exit_code, 0)
 
             request_data = {
@@ -784,7 +784,7 @@ class CLIFailTest(BaseWebLabTest):
         runner = CliRunner()
 
         with runner.isolated_filesystem():
-            result = runner.invoke(self.app.cli, ["fake-new-user"])
+            result = runner.invoke(self.app.cli, ["fake-new-user", "--dont-open-browser"])
             self.assertIn("Error processing", result.output)
 
 class WebLabConfigErrorsTest(unittest.TestCase):
@@ -846,7 +846,7 @@ class WebLabSetupErrorsTest(unittest.TestCase):
         })
         with StdWrap():
             sysargv = sys.argv
-            sys.argv = list(sys.argv) + [ 'fake-new-user']
+            sys.argv = list(sys.argv) + [ 'fake-new-user', '--dont-open-browser']
             try:
                 weblab = weblablib.WebLab(app)
             finally:

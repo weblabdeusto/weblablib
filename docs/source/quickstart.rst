@@ -925,9 +925,9 @@ The former is mandatory for the production mode, but the latter is the easiest v
 
    $ export FLASK_DEBUG=1
    $ export FLASK_APP=laboratory.py
-   $ flask fake-new-user --open-browser
+   $ flask fake-new-user
 
-This fakes a request from WebLab-Deusto, creating a new user. The argument ``--open-browser`` is optional, but providing it will open a session your default web browser (check `more information on how thisworks <https://docs.python.org/2/library/webbrowser.html>`_ if it uses a web browser you don't want).
+This fakes a request from WebLab-Deusto, creating a new user. By default, it opens a session your default web browser (check `more information on how thisworks <https://docs.python.org/2/library/webbrowser.html>`_ if it uses a web browser you don't want). You can avoid this by adding ``--dont-open-browser``.
 
 As you see, you will end in http://localhost:5000/ but with a working valid WebLab-Deusto session. ``fake-new-user`` uses some default parameters, that you can change:
 
@@ -948,7 +948,7 @@ As you see, you will end in http://localhost:5000/ but with a working valid WebL
      --assigned-time INTEGER  Time in seconds passed to the laboratory
      --back TEXT              URL to send the user back
      --locale TEXT            Language
-     --open-browser           Open the fake use in a web browser
+     --dont-open-browser      Do not open the fake use in a web browser
      --help                   Show this message and exit.
 
 So, for example, you could also run:
@@ -960,7 +960,7 @@ So, for example, you could also run:
                          --assigned-time 600 \
                          --back https://en.wikipedia.org/wiki/Homer_Simpson \
                          --locale en
-                         --open-browser
+                         --dont-open-browser
 
 You can also fake stopping the current session by running:
 

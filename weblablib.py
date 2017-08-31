@@ -463,8 +463,8 @@ class WebLab(object):
             @click.option('--locale', default='en', help="Language")
             @click.option('--experiment-name', default='mylab', help="Experiment name")
             @click.option('--category-name', default='Lab Experiments', help="Category name (of the experiment)")
-            @click.option('--open-browser', is_flag=True, help="Open the fake use in a web browser")
-            def fake_user(name, username, username_unique, assigned_time, back, locale, experiment_name, category_name, open_browser):
+            @click.option('--dont-open-browser', is_flag=True, help="Do not open the fake user in a web browser")
+            def fake_user(name, username, username_unique, assigned_time, back, locale, experiment_name, category_name, dont_open_browser):
                 """
                 Create a fake WebLab-Deusto user session.
 
@@ -496,8 +496,6 @@ class WebLab(object):
                     print("Congratulations! The session is started")
                     print()
                     print("Open: {}".format(result['url']))
-                    if not open_browser:
-                        print(" (Next time, you can use --open-browser to automatically open the session in your web browser)")
                     print()
                     print("Session identifier: {}\n".format(result['session_id']))
                     open(".fake_weblab_user_session_id", 'w').write(result['session_id'])
@@ -505,7 +503,7 @@ class WebLab(object):
                     print(" - flask fake-status")
                     print(" - flask fake-dispose")
                     print()
-                    if open_browser:
+                    if not dont_open_browser:
                         webbrowser.open(result['url'])
                 else:
                     print()
