@@ -7,6 +7,10 @@ documentation about WebLab-Deusto at:
 
    https://weblabdeusto.readthedocs.org/
 
+And the documentation on weblablib at:
+
+   https://docs.labsland.com/weblablib/
+
 This library heavily relies on Flask, so if you are new to Flask, you might find very useful to
 learn a bit about it first:
 

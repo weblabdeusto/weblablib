@@ -10,7 +10,7 @@ weblablib - development
 
     This is the documentation of the development version.
 
-    Go to https://weblablib.readthedocs.org/en/stable/ for the latest stable version.
+    Go to https://docs.labsland.com/weblablib/ for the latest stable version.
 
 weblablib is a library for creating `WebLab-Deusto <https://github.com/weblabdeusto/weblabdeusto/>`_ remote laboratories.
 

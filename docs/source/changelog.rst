@@ -6,6 +6,8 @@ Changelog
 Version 0.4
 -----------
 
+Link: https://docs.labsland.com/weblablib/en/0.4/
+
 General
 ^^^^^^^
 
@@ -41,6 +43,8 @@ CLI changes
 Version 0.3
 -----------
 
+Link: https://docs.labsland.com/weblablib/en/0.3/
+
  * Added ``weblab_user.locale`` for i18n processing.
  * Added ``weblab_user.experiment_name``, ``weblab_user.category_name`` and ``weblab_user.experiment_id`` as more metadata about the context on how the laboratory is used.
  * Added ``task.done``, ``task.failed``, ``task.finished``, ``task.running``, ``task.submitted`` so as to avoid playing with strings.
@@ -53,5 +57,7 @@ Version 0.3
 
 Version 0.2
 -----------
+
+Link: https://docs.labsland.com/weblablib/en/0.2/
 
 Version 0.1 was uploaded to Pypi, etc., but was not production ready (no tests, docs, some bugs, etc.)
