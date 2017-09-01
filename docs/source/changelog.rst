@@ -12,6 +12,7 @@ General
 ^^^^^^^
 
  * Added ``WEBLAB_NO_THREAD`` which is equivalent to ``WEBLAB_AUTOCLEAN_THREAD=False`` and ``WEBLAB_TASK_THREADS_PROCESS=0``.
+ * A ``WebLabTask`` supports ``.join()`` method. It defaults to ``.join(timeout=None, error_on_timeout=True)``,  raising an error, but can be configured with those parameters.
 
 WebSockets
 ^^^^^^^^^^

@@ -39,7 +39,7 @@ def create_app(config_name):
     redis.init_app(app)
     babel.init_app(app)
     assets.init_app(app)
-    socketio.init_app(app)
+    socketio.init_app(app, message_queue='redis://', channel='mylab')
 
     # Register the views
     from .views import main_blueprint

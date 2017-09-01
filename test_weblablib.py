@@ -4,6 +4,7 @@ import json
 import time
 import base64
 import datetime
+import threading
 
 import six
 if six.PY2:
@@ -426,9 +427,30 @@ class UserTest(BaseSessionWebLabTest):
 
         # But the counter is still zero
         self.assertEquals(self.counter, 0)
+    
+        global started
+        started = False
+
+        def wait_for_thread():
+            global started
+            started = True
+            task1.join(timeout=3)
+
+        background_thread = threading.Thread(target=wait_for_thread)
+        background_thread.daemon = True
+        background_thread.start()
+
+        initial = time.time()
+        while not started:
+            time.sleep(0.05)
+            if time.time() - initial > 2:
+                self.fail("Error waiting for thread to start")
 
         # Run the tasks
         self.weblab.run_tasks()
+
+        background_thread.join(timeout=5)
+        self.assertFalse(background_thread.isAlive())
 
         # The task has been run
         self.assertEquals(self.counter, 1)
@@ -595,6 +617,60 @@ class TaskFailTest(BaseSessionWebLabTest):
         self.assertEqual(task.error['code'], 'exception')
         self.assertIn('zero', task.error['message'])
         self.assertEqual(task.error['class'], 'ZeroDivisionError')
+
+class TaskJoinTimeoutTest(BaseSessionWebLabTest):
+
+    def lab(self):
+        task = self.current_task.delay()
+        return str(task.task_id)
+
+    def task(self):
+        return -1
+
+    def test_task_join_timeout(self):
+        # New user 
+        launch_url1, session_id1 = self.new_user()
+
+        response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+
+        task_id = response
+
+        task = self.weblab.get_task(response)
+        
+        # Task has not started. Perfect for running joins with timeout:
+        with self.assertRaises(weblablib.TimeoutError):
+            task.join(timeout=0.1)
+
+        self.assertFalse(task.finished)
+        task.join(timeout=0.1, error_on_timeout=False)
+        self.assertFalse(task.finished)
+
+class TaskJoinSameThreadTest(BaseSessionWebLabTest):
+
+    def lab(self):
+        task = self.current_task.delay()
+        return str(task.task_id)
+
+    def task(self):
+        weblablib.current_task.join(timeout=0.5)
+
+    def test_task_join_timeout(self):
+        # New user 
+        launch_url1, session_id1 = self.new_user()
+
+        response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+
+        task_id = response
+
+        with StdWrap():
+            self.weblab.run_tasks()
+
+        task = self.weblab.get_task(response)
+        self.assertTrue(task.failed)
+        self.assertEquals('exception', task.error['code'])
+        self.assertEquals('RuntimeError', task.error['class'])
+        self.assertIn('Deadlock', task.error['message'])
+        
 
 class MyLabUser(object):
     def __init__(self, username_unique, username):

@@ -1852,6 +1852,9 @@ class InvalidConfigError(WebLabError, ValueError):
 class WebLabNotInitializedError(WebLabError):
     pass
 
+class TimeoutError(WebLabError):
+    pass
+
 class _NotFoundError(WebLabError, KeyError):
     pass
 
@@ -1901,6 +1904,26 @@ class WebLabTask(object):
         self._weblab = weblab
         self._redis_manager = weblab._redis_manager
         self._task_id = task_id
+
+    def join(self, timeout=None, error_on_timeout=True):
+        """
+        Wait for the task to finish. timeout is seconds, if set it will raise an exception
+        if error_on_timeout, otherwise it will just finish. You can't call this method from
+        the task itself (a RuntimeError will be raised). You must avoid calling this from
+        one task and then waiting the current task from the other.
+        """
+        if current_task:
+            if current_task.task_id == self._task_id:
+                raise RuntimeError("Deadlock detected: you're calling join from the task itself")
+
+        initial_time = time.time()
+        while not self.finished:
+            if timeout:
+                if time.time() - initial_time > timeout:
+                    if error_on_timeout:
+                        raise TimeoutError("{} seconds passed".format(timeout))
+                    return
+                time.sleep(0.05)
 
     @property
     def task_id(self):
