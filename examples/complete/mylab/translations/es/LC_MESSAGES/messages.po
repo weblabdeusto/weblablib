@@ -35,7 +35,7 @@ msgid ""
 "However, given that in <tt>views.py</tt> the view <tt>index</tt> is using"
 " <tt>@requires_login</tt> instead of <tt>@requires_active</tt>, the user "
 "can still access the lab"
-msgstr "Sin embargo, dado que en <tt>views.py</ttt> la vista <tt>index</tt> usa"
+msgstr "Sin embargo, dado que en <tt>views.py</tt> la vista <tt>index</tt> usa"
 " <tt>@requires_login</tt> en lugar de <tt>@requires_active</tt>, el usuario "
 "puede todavía acceder al laboratorio"
 
