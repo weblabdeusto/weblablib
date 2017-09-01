@@ -9,59 +9,127 @@ This is a complete example of how to use **weblablib**. It is based on the `adva
 
 This lab is just a simple laboratory showing ten light bulbs (on which you can click to turn them on and off) and a fake "microcontroller" that you can either send a file that works or one which doesn't.
 
-## File structure
+You can find more documentation in the `advanced` example
 
-The structure is as follows:
+## Internationalization
 
-### autoapp.py
+This lab supports multiple languages (only English and Spanish right now). In your Python code, you can put things like:
 
-It's a helper file, to assist the [Flask CLI](http://flask.pocoo.org/docs/0.12/cli). It just calls the `create_app` method.
+```python
 
-### config.py
+from flask_babel import gettext, lazy_gettext
 
-The configuration file. Many of the values are taken from the environment variables. See the `wsgi_app.py` file for an example on how to configure it.
+# ...
 
-### requirements.txt
+# Outside request
+ERROR_MESSAGE = lazy_gettext("This is my error message")
 
-The Python requirements file, with all the dependencies.
+# ...
 
-### mylab folder
+# Inside request
+@app.route('/lab')
+@requires_login
+def lab():
+    # ...
+    if error:
+       return render_template("error.html", message=gettext("There was an error in the server"))
+```
 
-#### mylab/hardware.py
+or in your templates:
 
-This file represents the access to the hardware. Typically here you would use a library or do something depending on your laboratory (e.g., using serial ports, LXI, Raspberry Pi API...).
+```jinja
+<h1>{{ gettext("Complete laboratory") }}</h1>
+```
 
-#### mylab/views.py
+By default, it will work as if you didn't put ``gettext``/``lazy_gettext`` (returning that string). Then, check the ``babel.cfg`` file (to see that the folder matches your project). Then you can run the following commands:
 
-Flask views for the different web methods in the laboratory (programming the microcontroller, turning on the lights, current status...). The JavaScript code will call these methods.
+```shell
+# Extract all the messages (this reads all the files and finds any message doing gettext() or similar and stores it in messages.pot)
+$ pybabel extract -F babel.cfg -k lazy_gettext -k ng_gettext -o messages.pot --project complete --version 0.1 .
 
-#### mylab/__init__.py
+# ONLY FOR NEW LANGUAGES: If you wanted to create a new set of translations for French for example, you would need to run this:
+$ pybabel init -i messages.pot -d mylab/translations -l fr
 
-Creation of the Flask app and registering the views, etc.
+# Once you have run the 'pybabel extract' command, messages.pot will be updated, but not each language. Whenever you
+# run this other command, you'll find a folder in mylab/translations/es/LC_MESSAGES/messages.po, which is a text file
+# you can edit (or you can use existing tools such as Google Translator Toolkit to edit)
+$ pybabel update -i messages.pot -d mylab/translations -l es
 
-#### mylab/static/js/lab.js
+# Once you have edited the '.po' file, you can run this command to create a '.mo' file, which is used by Flask automatically
+# whenever you restart the Flask application/gunicorn.
+$ pybabel compile -f -d mylab/translations
+```
 
-JavaScript code.
+And then, depending on the language, it will use one text or another. So as to know which language it should be using, ``weblab_user`` provides a ``locale`` variable which is what the final system stated. Also, you can simply append a ``?locale=`` to the URL or similar. How this is decided is in the ``mylab/__init__.py`` file (search for ``localeselector``).
 
-#### mylab/templates/index.html
+Check [Flask-Babel](https://pythonhosted.org/Flask-Babel/) for more information on internationalization.
 
-HTML template (using `weblab_poll_script`, `weblab_user.time_left`, etc.).
+## Assets
 
-## Session management
+[Flask-Assets](https://flask-assets.readthedocs.io/) is a powerful library for managing static files such as CSS or JavaScript.
 
-WebLab-Deusto will be in charge of the session.
+In all the examples, we use public CDNs (Content Delivery Network), which are external servers that provides contents; in our case, providing popular open source libraries such as [Bootstrap](http://getbootstrap.com/), [jQuery](https://jquery.com/) or [socket.io](https://socket.io/).
 
-Flask comes with an object called `session` that is available in all the requests, but not in requests done by WebLab-Deusto or in threads (tasks, etc.).
+However, in your case, you might want to download the libraries and share them in your static folder. Once you do it, you may want to use Flask-Assets to put all of them together in a single static file, and do the same with your code in a separate file, by putting this in your Jinja templates:
 
-For that reason there is something called `weblab_user.data`, which by default is a dictionary, and you can add data to it that will be available through different views and threads. You can see in `hardware.py` how it can be used.
+```jinja
+{% assets filters="cssmin", output='gen/vendor.min.css',
+                           'css/bootstrap.css' %}
+<link rel="stylesheet" href="{{ ASSET_URL }}">
+{% endassets %}
+{% assets filters="cssmin", output='gen/app.min.css',
+                           'css/app.css' %}
+<link rel="stylesheet" href="{{ ASSET_URL }}">
+{% endassets %}
 
-## Tasks
+<!-- later on -->
 
-In `hardware.py` there is an example of a task, that takes long to be executed (10 seconds). It is run from `views.py` with `program_device.delay(code)`, and you can see how the task can be retrieved, etc.
+{% assets filters="jsmin", output='gen/vendor.min.js',
+                           'vendor/jquery.js',
+                           'vendor/bootstrap.js',
+                           'vendor/socketio.js' %}
+<script src="{{ ASSET_URL }}"></script>
+{% endassets %}
+{% assets filters="jsmin", output='gen/app.min.js',
+                           'js/lab.js' %}
+<script src="{{ ASSET_URL }}"></script>
+{% endassets %}
+```
 
-## Commands
+If you run this code, it will generate in the ``static/gen`` folder a set of files (``vendor.min.css``, ``app.min.css``, ``vendor.min.js`` and ``app.min.js``), and when displaying your template on the web browser, you will see something like the following:
 
-In addition to the commands that come from *weblablib*, in `mylab/__init__.py` you can see how you can add custom commands to do things like cleaning resources from outside.
+```html
+<link rel="stylesheet" href="/static/gen/vendor.min.css?0bddf6cd">
+<link rel="stylesheet" href="/static/gen/app.min.css?cd0bddf6">
+
+<!-- later on -->
+
+<script src="/static/gen/vendor.min.js?f6cd0bdd"></script>
+<script src="/static/gen/app.min.js?ddf6cd0b"></script>
+```
+
+This has several advantages:
+ 1. It generates files that the web browser can safely cache. You can put in the web server a strict policy on the ``static`` directory. Whenever there is any change, Flask will generate a different file, and the URL will be different (since the ``?ddf6cd0b`` is a hash of the contents), so the web browser will load the new version. The separation of ``vendor`` (external libraries) and ``app`` (your code) is also relevant for this: typically you change your code more often that your libraries; and your code is typically smaller than the libraries. So recurring users' web browsers will have cached both the ``vendor`` and ``app`` files, and if you make an update, they will only have to re-download the ``app`` one.
+ 1. You reduce substantially the number of files that the web browser has to download and the overhead per connection, as well as the size of the files and the loading time by the web browser.
+
+However, in the example code you will only find it used once, since as we mentioned, we use CDNs:
+```jinja
+{% assets filters="jsmin", output='gen/app.min.js',
+                           'js/lab.js' %}
+<script src="{{ ASSET_URL }}"></script>
+{% endassets %}
+```
+
+The main disadvantage of using this mechanism is that when you're developing and there is an error, it's difficult to find out why or where (since the code was minified). For this reason, there is a configuration variable called ``ASSETS_DEBUG``. In our example, in Development, by default is ``False``; but you can activate it by putting:
+
+```shell
+ $ export ASSETS_DEBUG=1
+ $ flask run
+```
+
+Or by changing the ``config.py`` file to be always ``True`` on Development.
+
+Check more information on [Flask-Assets](https://flask-assets.readthedocs.io/).
 
 ## Deployment
 
@@ -106,7 +174,7 @@ And you can test it using [WebLab-Deusto](https://weblabdeusto.readthedocs.org) 
 ```shell
 
  $ export FLASK_APP=autoapp.py # (or . localrc)
- $ flask weblab fake new --open-browser
+ $ flask weblab fake new --locale es
 ```
 
 ### Running it for production environments

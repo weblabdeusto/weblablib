@@ -5,7 +5,7 @@
 
     <div class="container">
         <div class="row">
-            <h1>Welcome to <strong>mylab</strong>!</h1>
+            <h1>{{ gettext("Welcome to <strong>mylab</strong>!") }}</h1>
         </div>
         <br>
 
@@ -16,20 +16,20 @@
             <div class="row">
                 <div class="alert alert-danger col-md-6 col-md-offset-3">
                     <div class="text-center">
-                        <h3>Your session is expired</h3>
+                        <h3>{{ gettext("Your session is expired") }}</h3>
                     </div>
 
-                    <p>However, given that in <tt>views.py</tt> the view <tt>index</tt> is using <tt>@requires_login</tt> instead of <tt>@requires_active</tt>, the user can still access the lab</p>
+                    <p>{{ gettext("However, given that in <tt>views.py</tt> the view <tt>index</tt> is using <tt>@requires_login</tt> instead of <tt>@requires_active</tt>, the user can still access the lab") }}</p>
                     <br>
                     <div class="text-center">
-                        <a class="btn btn-danger" href="{{ weblab_user.back }}">Go back</a>
+                        <a class="btn btn-danger" href="{{ weblab_user.back }}">{{ gettext("Go back") }}</a>
                     </div>
                 </div>
             </div>
         {% else %}
             <div class="row">
                 <div class="pull-right">
-                    <a class="btn btn-warning" href="javascript:logout()">Log out</a>
+                    <a class="btn btn-warning" href="javascript:logout()">{{ gettext("Log out") }}</a>
                     <br><br>
                 </div>
             </div>
@@ -37,20 +37,20 @@
 
 
         <div class="row">
-            <p>This is just an example laboratory using <a href="https://docs.labsland.com/weblablib/">weblablib</a>. Imagine that we have 10 lights and a microcontroller with some code that interacts with them. Here we can turn on and off the lights and send programs to the microcontroller.</p>
-            <p>Time: <span id="timer"></span>.
+            <p>{{ gettext("This is just an example laboratory using <a href='%(link)s'>weblablib</a>. Imagine that we have 10 lights and a microcontroller with some code that interacts with them. Here we can turn on and off the lights and send programs to the microcontroller.", link='https://docs.labsland.com/weblablib/') }}</p>
+            <p>{{ gettext("Time:") }} <span id="timer"></span>.
         </div>
         <br><br>
 
         <div id="panel">
             <div class="row">
-                <h2>Lights: click on each light to change status (and read it in the console)</h2>
+                <h2>{{ gettext("Lights: click on each light to change status (and read it in the console)") }}</h2>
             </div>
             <br>
             <div class="row">
                 {% for light in range(1, 11) %}
                 <div class="col-sm-1 text-center">
-                    Light {{ light }}
+                    {{ gettext("Light %(number)s", number=light) }}
                     <br>
                     <a href="javascript:turnOff({{ light }})"><img width="50px" id="light_{{ light }}_on" src="https://openclipart.org/download/116581/bulb-on.svg"></a>
                     <a href="javascript:turnOn({{ light }})"><img width="50px" id="light_{{ light }}_off" src="https://openclipart.org/download/110269/1296215547.svg"></a>
@@ -60,20 +60,20 @@
             <br>
             <div class="row">
                 <div class="col-sm-4">
-                    Microcontroller status: <span id="microcontroller_status"></span>
+                    {{ gettext("Microcontroller status:") }} <span id="microcontroller_status"></span>
                 </div>
                 <div class="col-sm-4">
-                    <a class="btn btn-success" href="javascript:sendProgram('good')">Send good program</a>
+                    <a class="btn btn-success" href="javascript:sendProgram('good')">{{ gettext("Send good program") }}</a>
                     <br>
                     <br>
 
-                    <a class="btn btn-danger" href="javascript:sendProgram('division-by-zero')">Send bad program</a>
+                    <a class="btn btn-danger" href="javascript:sendProgram('division-by-zero')">{{ gettext("Send bad program") }}</a>
                 </div>
             </div>
 
             <div class="row text-center">
                 <div style="display: none" class="alert alert-danger" id="error_messages_box">
-                    <h3>Error</h3>
+                    <h3>{{ gettext("Error") }}</h3>
                     <p id="error_messages"></p>
                 </div>
             </div>
@@ -95,8 +95,18 @@
         var LOGOUT_URL = "{{ url_for('.logout_view') }}";
         var MICROCONTROLLER_URL = "{{ url_for('.microcontroller') }}";
 
+        // The .js code (in static) uses this message
+        var TIME_IS_OVER = "{{ gettext("Time is over!") }}";
+
+        // There is something called ngettext("%(num)s second", "%(num)s seconds", variable), but can't be applied in this static context
+        var SECONDS_SING = "{{ gettext("1 second") }}";
+        var SECONDS_PLURAL = "{{ gettext("NUM seconds") }}";
+
         var running = currentTime > 0;
     </script>
 
-    <script src="{{ url_for('static', filename="js/lab.js") }}"></script>
+    {% assets filters="jsmin", output='gen/app.min.js',
+                                        'js/lab.js' %}
+    <script src="{{ ASSET_URL }}"></script>
+    {% endassets %}
 {% endblock %}

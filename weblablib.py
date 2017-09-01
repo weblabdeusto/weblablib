@@ -433,7 +433,7 @@ class WebLab(object):
             click.disable_unicode_literals_warning = True
             @app.cli.group('weblab')
             def weblab_cli():
-                """WebLab related operations"""
+                """WebLab-Deusto related operations: initialize new sessions for development, run tasks, etc."""
                 pass
 
             @weblab_cli.command('clean-expired-users')
@@ -479,7 +479,12 @@ class WebLab(object):
 
             @weblab_cli.group()
             def fake():
-                """Fake user management"""
+                """Fake user management.
+
+                With this interface, you can test your laboratory without WebLab-Deusto. It implements the same
+                methods used by WebLab-Deusto (create new user, check status, kick out user), from a command
+                line interface. The "new" command has several parameters for changing language, user name, etc.
+                """
                 pass
 
             @fake.command('new')

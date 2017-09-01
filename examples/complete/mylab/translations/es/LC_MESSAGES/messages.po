@@ -1,0 +1,101 @@
+# Spanish translations for complete.
+# Copyright (C) 2017 ORGANIZATION
+# This file is distributed under the same license as the complete project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2017.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: complete 0.1\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2017-09-01 12:22-0700\n"
+"PO-Revision-Date: 2017-09-01 12:21-0700\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: es\n"
+"Language-Team: es <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.5.0\n"
+
+#: mylab/templates/_bootstrap.html:8
+msgid "My lab"
+msgstr "Mi laboratorio"
+
+#: mylab/templates/index.html:8
+msgid "Welcome to <strong>mylab</strong>!"
+msgstr "¡Bienvenidos a <strong>mylab</strong>!"
+
+#: mylab/templates/index.html:19
+msgid "Your session is expired"
+msgstr "Tu sesión ha caducado"
+
+#: mylab/templates/index.html:22
+msgid ""
+"However, given that in <tt>views.py</tt> the view <tt>index</tt> is using"
+" <tt>@requires_login</tt> instead of <tt>@requires_active</tt>, the user "
+"can still access the lab"
+msgstr "Sin embargo, dado que en <tt>views.py</ttt> la vista <tt>index</tt> usa"
+" <tt>@requires_login</tt> en lugar de <tt>@requires_active</tt>, el usuario "
+"puede todavía acceder al laboratorio"
+
+#: mylab/templates/index.html:25
+msgid "Go back"
+msgstr "Volver"
+
+#: mylab/templates/index.html:32
+msgid "Log out"
+msgstr "Salir"
+
+#: mylab/templates/index.html:40
+#, python-format
+msgid ""
+"This is just an example laboratory using <a "
+"href='%(link)s'>weblablib</a>. Imagine that we have 10 lights and a "
+"microcontroller with some code that interacts with them. Here we can turn"
+" on and off the lights and send programs to the microcontroller."
+msgstr "Este es sólo un ejemplo de laboratorio usando <a href='%(link)s'>weblablib</a>."
+" Imagina que tenemos 10 luces y un microcontrolador con algo de código que interacciona "
+"con las luces. Aquí podemos encender y apagar las luces y mandar programas al microcontrolador."
+
+#: mylab/templates/index.html:41
+msgid "Time:"
+msgstr "Tiempo:"
+
+#: mylab/templates/index.html:47
+msgid "Lights: click on each light to change status (and read it in the console)"
+msgstr "Luces: haz click en cada luz para cambiar su estado (y lee en la consola)"
+
+#: mylab/templates/index.html:53
+#, python-format
+msgid "Light %(number)s"
+msgstr "Luz %(number)s"
+
+#: mylab/templates/index.html:63
+msgid "Microcontroller status:"
+msgstr "Estado del microcontrolador:"
+
+#: mylab/templates/index.html:66
+msgid "Send good program"
+msgstr "Enviar programa bueno"
+
+#: mylab/templates/index.html:70
+msgid "Send bad program"
+msgstr "Enviar programa malo"
+
+#: mylab/templates/index.html:76
+msgid "Error"
+msgstr "Error"
+
+#: mylab/templates/index.html:99
+msgid "Time is over!"
+msgstr "¡Se ha acabado el tiempo!"
+
+#: mylab/templates/index.html:102
+msgid "1 second"
+msgstr "1 segundo"
+
+#: mylab/templates/index.html:103
+msgid "NUM seconds"
+msgstr "NUM segundos"
+

@@ -1,7 +1,7 @@
 function clean() {
     $("#panel").hide();
     // No more time
-    $("#timer").text("Time is over!");
+    $("#timer").text(TIME_IS_OVER);
     running = false;
     currentTime = 0;
     clearInterval(STATUS_INTERVAL);
@@ -13,9 +13,9 @@ function updateTime () {
     if (currentTime > 0) {
         // Still time
         if (currentTime > 1)
-            $("#timer").text(currentTime + " seconds");
+            $("#timer").text(SECONDS_PLURAL.replace("NUM", currentTime));
         else
-            $("#timer").text(currentTime + " second");
+            $("#timer").text(SECONDS_SING);
     } else {
         clean();
     }

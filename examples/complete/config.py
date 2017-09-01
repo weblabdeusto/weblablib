@@ -52,6 +52,7 @@ class DevelopmentConfig(Config):
     DEVELOPMENT = True
     DEBUG_TB_INTERCEPT_REDIRECTS = False
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'shared_secret_key'
+    ASSETS_DEBUG = (os.environ.get('ASSETS_DEBUG') or '0') == '1'
 
 class TestingConfig(Config):
     TESTING = True
