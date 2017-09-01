@@ -479,6 +479,11 @@ class UserTest(BaseSessionWebLabTest):
         self.client.get('/poll')
         self.client.get('/logout')
 
+        # Even before cleaning expired users
+        rv = self.client.get('/lab/active')
+        self.assertEquals(rv.location, 'http://weblab.deusto.es')
+
+
         self.weblab.clean_expired_users()
 
         self.status(session_id1)

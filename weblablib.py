@@ -1265,7 +1265,7 @@ def requires_active(func):
     """
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not weblab_user.active:
+        if not weblab_user.active or weblab_user.exited:
             if weblab_user.is_anonymous:
                 # If anonymous user: forbidden
                 return _current_weblab()._forbidden_handler()

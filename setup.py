@@ -23,7 +23,7 @@ classifiers=[
 cp_license="BSD 2-clause"
 
 setup(name='weblablib',
-      version='0.3',
+      version='0.4',
       description="WebLab-Deusto library for creating unmanaged laboratories",
       classifiers=classifiers,
       author='WebLab-Deusto team',
