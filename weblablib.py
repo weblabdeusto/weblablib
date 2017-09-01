@@ -1082,7 +1082,7 @@ class CurrentUser(WebLabUser):
 
     @property
     def active(self):
-        return True
+        return not self._exited
 
     @property
     def is_anonymous(self):
@@ -1265,7 +1265,7 @@ def requires_active(func):
     """
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not weblab_user.active or weblab_user.exited:
+        if not weblab_user.active:
             if weblab_user.is_anonymous:
                 # If anonymous user: forbidden
                 return _current_weblab()._forbidden_handler()
@@ -1615,7 +1615,8 @@ class _RedisManager(object):
         for active_key in self.client.keys('{}:weblab:active:*'.format(self.key_base)):
             session_id = active_key[len('{}:weblab:active:'.format(self.key_base)):]
             user = self.get_user(session_id)
-            if user.active: # Double check: he might be deleted in the meanwhile
+            if isinstance(user, CurrentUser): # Double check: he might be deleted in the meanwhile
+                # We don't use 'active', since active takes into account 'exited'
                 if user.time_left <= 0:
                     expired_sessions.append(session_id)
 
@@ -2096,7 +2097,7 @@ def _status_time(session_id):
     weblab = _current_weblab()
     redis_manager = weblab._redis_manager
     user = redis_manager.get_user(session_id)
-    if user.is_anonymous or not user.active:
+    if user.is_anonymous or not isinstance(user, CurrentUser):
         return -1
 
     if user.exited:
@@ -2138,7 +2139,7 @@ def _dispose_user(session_id, waiting):
     if user.is_anonymous:
         raise _NotFoundError()
 
-    if user.active:
+    if isinstance(user, CurrentUser):
         current_expired_user = user.to_expired_user()
         deleted = redis_manager.delete_user(session_id, current_expired_user)
 
