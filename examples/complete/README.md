@@ -169,6 +169,22 @@ In Microsoft Windows:
  C:\...\> flask run
 ```
 
+Additionally, you must run in other terminal:
+```shell
+ $ export FLASK_DEBUG=1
+ $ export FLASK_APP=autoapp.py
+ $ flask weblab loop
+```
+
+or in Windows:
+
+```shell
+ C:\...\> set FLASK_DEBUG=1
+ C:\...\> set FLASK_APP=autoapp.py
+ C:\...\> flask weblab loop
+```
+
+
 And you can test it using [WebLab-Deusto](https://weblabdeusto.readthedocs.org) or using the weblablib command line interface in other terminal:
 
 ```shell
