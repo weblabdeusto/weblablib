@@ -90,10 +90,8 @@
         var CSRF = {{ session['csrf']|tojson }};
 
         var currentTime = Math.round({{ weblab_user.time_left }});
-        var LIGHT_URL = "{{ url_for('.light', number=12345) }}".replace("12345", "LIGHT");
         var STATUS_URL = "{{ url_for('.status') }}";
         var LOGOUT_URL = "{{ url_for('.logout_view') }}";
-        var MICROCONTROLLER_URL = "{{ url_for('.microcontroller') }}";
 
         // The .js code (in static) uses this message
         var TIME_IS_OVER = "{{ gettext("Time is over!") }}";

@@ -2,7 +2,7 @@ import time
 
 from flask import Blueprint, url_for, render_template, jsonify, session, current_app, request
 
-from mylab import weblab
+from mylab import weblab, socketio
 from mylab.hardware import program_device, is_light_on, get_microcontroller_state, switch_light, LIGHTS
 
 from weblablib import requires_active, requires_login, weblab_user, logout
@@ -59,32 +59,17 @@ def logout_view():
 
     return jsonify(error=False)
 
-@main_blueprint.route('/lights/<int:number>', methods=['POST'])
-@requires_active
-def light(number):
-    # light number is 1..10
-    internal_number = number - 1
-
-    # Check that number is valid
-    if internal_number not in range(LIGHTS):
-        return jsonify(error=True, message="Invalid light number")
-
-    if not _check_csrf():
-        return jsonify(error=True, message="Invalid CSRF")
-
-    # Turn on light
-    switch_light(internal_number, request.values.get('state', 'false') == 'true')
+@socketio.on('lights')
+def lights_event(data):
+    state = data['state']
+    number = data['number'] - 1
+    switch_light(number, state)
     return status()
 
 
-
-@main_blueprint.route('/microcontroller', methods=['POST'])
-@requires_active
-def microcontroller():
-    if not _check_csrf():
-        return jsonify(error=True, message="Invalid CSRF")
-
-    code = request.values.get('code') or "code"
+@socketio.on('program-state')
+def microcontroller(data):
+    code = data.get('code') or "code"
 
     # If there are running tasks, don't let them send the program
     if len(weblab.running_tasks):

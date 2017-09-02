@@ -1,3 +1,5 @@
+var socket = io.connect('http://' + document.domain + ':' + location.port);
+
 function clean() {
     $("#panel").hide();
     // No more time
@@ -34,18 +36,16 @@ function turnOff(number) {
 }
 
 function turnLight(number, state) {
-    $.post(LIGHT_URL.replace("LIGHT", number), {
-        csrf: CSRF,
-        state: state
-    }).done(parseStatus);
+    socket.emit('lights', {number:number, state: state})
 }
 
 function sendProgram(code) {
-    $.post(MICROCONTROLLER_URL, {
-        csrf: CSRF,
-        code: code
-    }).done(parseStatus);
+    socket.emit('program', {code: code})
 }
+
+socket.on('program-state', function(data) {
+    parseStatus(data);
+})
 
 function logout() {
     $.post(LOGOUT_URL, {
