@@ -197,6 +197,8 @@ class WebLab(object):
 
         self.cleaner_thread_interval = 5
         self.timeout = 15 # Will be overrided by the init_app method
+        self.join_step_time = 0.05 # Default value, when calling task.join() how long it should wait.
+        # Advanced developers can modify this on real time.
         self._initial_url = None
         self._session_id_name = 'weblab_session_id' # overrided by WEBLAB_SESSION_ID_NAME
         self._redirection_on_forbiden = None
@@ -1923,7 +1925,7 @@ class WebLabTask(object):
                     if error_on_timeout:
                         raise TimeoutError("{} seconds passed".format(timeout))
                     return
-                time.sleep(0.05)
+                time.sleep(self._weblab.join_step_time)
 
     @property
     def task_id(self):
