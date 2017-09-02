@@ -748,14 +748,17 @@ class LongTaskTest(BaseSessionWebLabTest):
         t0 = time.time()
         while True:
             task = self.weblab.get_task(task_id)
-            if task.status == 'running':
+            # Temporal variable since sometimes the change happens
+            # between task.status and the next task.status
+            task_status = task.status
+            if task_status == 'running':
                 self.assertTrue(task.running)
                 self.assertFalse(task.finished)
                 self.assertFalse(task.done)
                 self.assertFalse(task.failed)
                 self.assertFalse(task.submitted)
                 break
-            self.assertEquals(task.status, 'submitted')
+            self.assertEquals(task_status, 'submitted')
             time.sleep(0.03)
 
             if time.time() - t0 > max_time:
