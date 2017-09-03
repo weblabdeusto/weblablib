@@ -62,10 +62,11 @@ from flask import Blueprint, Response, jsonify, request, current_app, redirect, 
 try:
     from flask_socketio import disconnect as socketio_disconnect
 except ImportError:
-    traceback.print_exc()
     _FLASK_SOCKETIO = False
+    _FLASK_SOCKETIO_IMPORT_ERROR = traceback.format_exc()
 else:
     _FLASK_SOCKETIO = True
+    _FLASK_SOCKETIO_IMPORT_ERROR = None
 
 __all__ = ['WebLab',
            'logout', 'poll',
@@ -1304,7 +1305,8 @@ def socket_requires_login(func):
     Decorator. Requires the user to be a user (expired or active); otherwise it calls socketio_disconnect
     """
     if not _FLASK_SOCKETIO:
-        print("Warning: using socket_requires_active on {} but Flask-SOCKETIO was not properly imported. Nothing is done.".format(func))
+        print("Warning: using socket_requires_active on {} but Flask-SocketIO was not properly imported). Nothing is done.".format(func))
+        print(_FLASK_SOCKETIO_IMPORT_ERROR)
         return func
 
     @wraps(func)
@@ -1321,6 +1323,7 @@ def socket_requires_active(func):
     """
     if not _FLASK_SOCKETIO:
         print("Warning: using socket_requires_active on {} but Flask-SOCKETIO was not properly imported. Nothing is done.".format(func))
+        print(_FLASK_SOCKETIO_IMPORT_ERROR)
         return func
 
     @wraps(func)
