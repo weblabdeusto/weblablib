@@ -69,5 +69,11 @@ if __name__ == '__main__':
     app.run(debug=True)
 ```
 
-See further examples in the ``examples`` directory.
+## Advance examples
 
+You may find [here](https://github.com/weblabdeusto/weblablib/tree/master/examples) the following examples:
+ * [simple](https://github.com/weblabdeusto/weblablib/tree/master/examples/simple): basic usage, all in one file.
+ * [advanced](https://github.com/weblabdeusto/weblablib/tree/master/examples/advanced): more advanced usage, with separation of files, tasks, more complex session management
+ * [complete](https://github.com/weblabdeusto/weblablib/tree/master/examples/complete): based on advanced, but using WebSockets with Flask-SocketIO, internationalization with Flask-Babel and minimified static files with Flask-Assets.
+
+There is another example called ``quickstart``, which is the one used in the documentation, which is something in between ``simple`` and ``advanced``.

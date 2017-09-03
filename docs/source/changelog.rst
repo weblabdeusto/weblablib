@@ -18,6 +18,16 @@ WebSockets
 ^^^^^^^^^^
 
  * Flask-SocketIO support through helpers
+   * ``socket_requires_login`` and ``socket_requires_active`` behave similar to ``requires_login`` and ``requires_active``; but calling ``disconnect`` of Flask-SocketIO
+   * ``socket_weblab_user`` is equivalent to ``weblab_user``, but using it in real time without caching. This avoids the typical problems of a long-standing thread with WebSockets
+
+Examples
+^^^^^^^^
+
+ * A new example, ``complete``, has been added. It includes:
+   * Example of WebSocket support, including in a task in a different process.
+   * Example of use of Flask-Babel for internationalization
+   * Example of use of Flask-Assets for minimizing the static files
 
 CLI changes
 ^^^^^^^^^^^

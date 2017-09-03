@@ -54,7 +54,7 @@ import six
 import redis
 import click
 
-from werkzeug import LocalProxy
+from werkzeug import LocalProxy, ImmutableDict
 from flask import Blueprint, Response, jsonify, request, current_app, redirect, \
      url_for, g, session, after_this_request, render_template, Markup, \
      has_request_context
@@ -69,8 +69,12 @@ else:
 
 __all__ = ['WebLab',
            'logout', 'poll',
-           'weblab_user',
+           'weblab_user', 'get_weblab_user', 'socket_weblab_user',
            'requires_login', 'requires_active',
+           'socket_requires_login', 'socket_requires_active',
+           'current_task', 'WebLabTask',
+           'WebLabError', 'NoContextError', 'InvalidConfigError',
+           'WebLabNotInitializedError', 'TimeoutError',
            'CurrentUser', 'AnonymousUser', 'ExpiredUser']
 
 class ConfigurationKeys(object):
@@ -943,6 +947,10 @@ class AnonymousUser(WebLabUser):
     def locale(self):
         return None
 
+    @property
+    def data(self):
+        return ImmutableDict()
+
     def __str__(self):
         return "Anonymous user"
 
@@ -1225,7 +1233,7 @@ def poll():
         g.poll_requested = True
 
 
-def _weblab_user(cached=True):
+def get_weblab_user(cached=True):
     """
     Get the current user. Optionally, return the ExpiredUser if the current one expired.
 
@@ -1247,9 +1255,9 @@ def _set_weblab_user_cache(user):
     g.weblab_user = user
     return user
 
-weblab_user = LocalProxy(_weblab_user) # pylint: disable=invalid-name
+weblab_user = LocalProxy(get_weblab_user) # pylint: disable=invalid-name
 
-socket_weblab_user = LocalProxy(lambda : _weblab_user(cached=False))
+socket_weblab_user = LocalProxy(lambda : get_weblab_user(cached=False)) # pylint: disable=invalid-name
    
 
 def _current_task():

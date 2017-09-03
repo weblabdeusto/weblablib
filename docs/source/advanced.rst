@@ -112,6 +112,11 @@ user will be assigned until the task is finished. So make sure that your task en
 so as to not consume time of other users, and avoid starting tasks when the
 ``weblab_user.time_left`` is too short.
 
+WebSockets with Flask-SocketIO
+------------------------------
+
+asdf
+
 Multiple laboratories in the same server
 ----------------------------------------
 

@@ -124,7 +124,7 @@ The main disadvantage of using this mechanism is that when you're developing and
 
 ```shell
  $ export ASSETS_DEBUG=1
- $ flask run
+ $ python run_debug.py
 ```
 
 Or by changing the ``config.py`` file to be always ``True`` on Development.
@@ -148,25 +148,20 @@ So as to run it, in Linux / Mac OS X:
 
 ```shell
 
- $ export FLASK_DEBUG=1 # If developing
- $ export FLASK_APP=autoapp.py
- $ flask run
+ $ python run_debug.py
 
 ```
 
 Alternatively, you can do also:
 ```shell
- $ . localrc
- $ flask run
+ $ python run_debug.py
 ```
 
 Since ``localrc`` already contains those variables.
 
 In Microsoft Windows:
 ```shell
- C:\...\> set FLASK_DEBUG=1 # If developing
- C:\...\> set FLASK_APP=autoapp.py
- C:\...\> flask run
+ C:\...\> python run_debug.py
 ```
 
 Additionally, you must run in other terminal:
