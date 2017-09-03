@@ -70,10 +70,10 @@ def create_app(config_name):
 @babel.localeselector
 def get_locale():
     """Defines what's the current language for the user. It uses different approaches"""
-    supported_languages = [ translation.language for translation in babel.list_translations() ]
-
+    # 'en' is supported by default
+    supported_languages = ['en'] + [ translation.language for translation in babel.list_translations() ]
     locale = None
-    
+
     # This is used also from tasks (which are not in a context environment)
     if has_request_context():
         # If user accesses http://localhost:5000/?locale=es force it to Spanish, for example
@@ -89,7 +89,7 @@ def get_locale():
 
     if locale is None:
         locale = weblab_user.data.get('locale')
-
+    
     # Otherwise, check what the web browser is using (the web browser might state multiple
     # languages)
     if has_request_context():
@@ -101,6 +101,8 @@ def get_locale():
         locale = 'en'
 
     # Store the decision so next time we don't need to check everything again
-    weblab_user.data['locale'] = locale
+    if weblab_user.active:
+        weblab_user.data['locale'] = locale
+
     return locale
 
