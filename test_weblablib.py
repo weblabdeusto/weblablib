@@ -18,6 +18,14 @@ import weblablib
 import unittest
 from click.testing import CliRunner
 
+try:
+    from flask_socketio import SocketIO, SocketIOTestClient
+except ImportError:
+    print()
+    print("Important: if you do not have SocketIO you can't run these tests")
+    print()
+    raise
+
 
 os.environ['FLASK_APP'] = 'fake.py' # Overrided later
 cmp = lambda a, b: a.__cmp__(b)
@@ -390,7 +398,7 @@ class UserTest(BaseSessionWebLabTest):
 
     def test_simple(self):
         # New user 
-        launch_url1, session_id1 = self.new_user(language='es')
+        launch_url1, session_id1 = self.new_user(language='esp')
 
         # counter is zero
         self.counter = 0
@@ -400,7 +408,7 @@ class UserTest(BaseSessionWebLabTest):
         response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
 
         self.assertEquals(weblablib.weblab_user.session_id, session_id1)
-        self.assertEquals(weblablib.weblab_user.locale, 'es')
+        self.assertEquals(weblablib.weblab_user.locale, 'es') # 'es', not 'esp'
         self.assertEquals(weblablib.weblab_user.full_name, 'Jim Smith')
         self.assertEquals(weblablib.weblab_user.experiment_name, 'mylab')
         self.assertEquals(weblablib.weblab_user.category_name, 'Lab experiments')
@@ -871,6 +879,65 @@ class CLIFailTest(BaseWebLabTest):
             result = runner.invoke(self.app.cli, ["weblab", "fake", "new", "--dont-open-browser"])
             self.assertIn("Error processing", result.output)
 
+class WebLabSocketIOTest(BaseSessionWebLabTest):
+
+    def create_socketio(self):
+        self.socketio = SocketIO(self.app)
+
+        @self.socketio.on('connect')
+        @weblablib.socket_requires_login
+        def on_connect():
+            self.socketio.emit('results', {'result': 'onconnected'}, namespace='/test')
+
+        @self.socketio.on('my-active-test', namespace='/test')
+        @weblablib.socket_requires_active
+        def active_message(message):
+            self.socketio.emit('results', {'result': 'onactive'}, namespace='/test')
+
+        @self.socketio.on('my-login-test', namespace='/test')
+        @weblablib.socket_requires_login
+        def login_message(message):
+            self.socketio.emit('results', {'result': 'onlogin'}, namespace='/test')
+
+    def setUp(self):
+        super(WebLabSocketIOTest, self).setUp()
+        self.create_socketio()
+
+    def test_socket_requires_active(self):
+        socket_client = self.socketio.test_client(app=self.app, namespace='/test')
+        socket_client.emit('my-login-test', "hi login", namespace='/test')
+        socket_client.emit('my-active-test', "hi active", namespace='/test')
+        results = socket_client.get_received(namespace='/test')
+        self.assertEquals(len(results), 0)
+
+        launch_url1, session_id1 = self.new_user()
+        response = self.client.get(launch_url1, follow_redirects=False)
+        cookie = response.headers['Set-Cookie']
+        headers = {
+            'Cookie': cookie.split(';')[0]
+        }
+
+        socket_client = self.socketio.test_client(app=self.app, namespace='/test', headers=headers)
+        socket_client.connect(namespace='/test', headers = headers)
+        socket_client.emit('my-login-test', "hi login", namespace='/test')
+        socket_client.emit('my-active-test', "hi active", namespace='/test')
+        results = socket_client.get_received(namespace='/test')
+        self.assertEquals(len(results), 3)
+        self.assertEquals(results[0]['args'][0]['result'], 'onconnected')
+        self.assertEquals(results[1]['args'][0]['result'], 'onlogin')
+        self.assertEquals(results[2]['args'][0]['result'], 'onactive')
+        socket_client.disconnect()
+
+        self.client.get('/logout')
+
+        socket_client = self.socketio.test_client(app=self.app, namespace='/test', headers=headers)
+        socket_client.emit('my-login-test', "hi login", namespace='/test')
+        socket_client.emit('my-active-test', "hi active", namespace='/test')
+        results = socket_client.get_received(namespace='/test')
+        self.assertEquals(len(results), 1)
+        self.assertEquals(results[0]['args'][0]['result'], 'onlogin')
+
+
 class WebLabConfigErrorsTest(unittest.TestCase):
 
     def _check_error(self, config, error_class, message):
@@ -1100,3 +1167,26 @@ class WebLabSetupErrorsTest(unittest.TestCase):
                     pass
         finally:
             self.weblab._cleanup()
+
+    def test_socket_requires_login_without_socketio(self):
+        past_value = weblablib._FLASK_SOCKETIO
+        weblablib._FLASK_SOCKETIO = False
+        try:
+            with StdWrap():
+                @weblablib.socket_requires_login
+                def f():
+                    pass
+        finally:
+            weblablib._FLASK_SOCKETIO = past_value
+
+    def test_socket_requires_active_without_socketio(self):
+        past_value = weblablib._FLASK_SOCKETIO
+        weblablib._FLASK_SOCKETIO = False
+        try:
+            with StdWrap():
+                @weblablib.socket_requires_active
+                def f():
+                    pass
+        finally:
+            weblablib._FLASK_SOCKETIO = past_value
+

@@ -1249,7 +1249,7 @@ def _set_weblab_user_cache(user):
 
 weblab_user = LocalProxy(_weblab_user) # pylint: disable=invalid-name
 
-socket_weblab_user = LocalProxy(lambda : _weblab_user(cache=False))
+socket_weblab_user = LocalProxy(lambda : _weblab_user(cached=False))
    
 
 def _current_task():

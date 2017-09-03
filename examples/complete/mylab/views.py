@@ -6,7 +6,7 @@ from flask_socketio import emit
 from mylab import weblab, socketio
 from mylab.hardware import program_device, switch_light, hardware_status
 
-from weblablib import requires_active, requires_login, weblab_user, logout
+from weblablib import requires_active, requires_login, socket_requires_active, weblab_user, logout
 
 main_blueprint = Blueprint('main', __name__)
 
@@ -36,10 +36,12 @@ def index():
 # 
 
 @socketio.on('connect', namespace='/mylab')
+@socket_requires_active
 def connect_handler():
     emit('board-status', hardware_status(), namespace='/mylab')
 
 @socketio.on('lights', namespace='/mylab')
+@socket_requires_active
 def lights_event(data):
     state = data['state']
     number = data['number'] - 1
@@ -48,6 +50,7 @@ def lights_event(data):
 
 
 @socketio.on('program', namespace='/mylab')
+@socket_requires_active
 def microcontroller(data):
     code = data.get('code') or "code"
 
