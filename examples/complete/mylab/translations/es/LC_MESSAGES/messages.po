@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: complete 0.1\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2017-09-01 12:22-0700\n"
+"POT-Creation-Date: 2017-09-02 17:43-0700\n"
 "PO-Revision-Date: 2017-09-01 12:21-0700\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: es\n"
@@ -17,6 +17,27 @@ msgstr ""
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.5.0\n"
+
+#: mylab/hardware.py:125
+msgid "Programming: %(step)s"
+msgstr "Programando: %(step)s"
+
+#: mylab/hardware.py:127
+msgid "Empty memory"
+msgstr "Memoria vacía"
+
+#: mylab/hardware.py:129
+msgid "Programming failed"
+msgstr "Programación fallida"
+
+#: mylab/hardware.py:131
+msgid "Programming worked!"
+msgstr "El programa ha funcionado!"
+
+#: mylab/hardware.py:133
+#, python-format
+msgid "Invalid state: %(state)s"
+msgstr "Estado inválido: %(state)s"
 
 #: mylab/templates/_bootstrap.html:8
 msgid "My lab"
@@ -35,9 +56,10 @@ msgid ""
 "However, given that in <tt>views.py</tt> the view <tt>index</tt> is using"
 " <tt>@requires_login</tt> instead of <tt>@requires_active</tt>, the user "
 "can still access the lab"
-msgstr "Sin embargo, dado que en <tt>views.py</tt> la vista <tt>index</tt> usa"
-" <tt>@requires_login</tt> en lugar de <tt>@requires_active</tt>, el usuario "
-"puede todavía acceder al laboratorio"
+msgstr ""
+"Sin embargo, dado que en <tt>views.py</tt> la vista <tt>index</tt> usa "
+"<tt>@requires_login</tt> en lugar de <tt>@requires_active</tt>, el "
+"usuario puede todavía acceder al laboratorio"
 
 #: mylab/templates/index.html:25
 msgid "Go back"
@@ -54,9 +76,12 @@ msgid ""
 "href='%(link)s'>weblablib</a>. Imagine that we have 10 lights and a "
 "microcontroller with some code that interacts with them. Here we can turn"
 " on and off the lights and send programs to the microcontroller."
-msgstr "Este es sólo un ejemplo de laboratorio usando <a href='%(link)s'>weblablib</a>."
-" Imagina que tenemos 10 luces y un microcontrolador con algo de código que interacciona "
-"con las luces. Aquí podemos encender y apagar las luces y mandar programas al microcontrolador."
+msgstr ""
+"Este es sólo un ejemplo de laboratorio usando <a "
+"href='%(link)s'>weblablib</a>. Imagina que tenemos 10 luces y un "
+"microcontrolador con algo de código que interacciona con las luces. Aquí "
+"podemos encender y apagar las luces y mandar programas al "
+"microcontrolador."
 
 #: mylab/templates/index.html:41
 msgid "Time:"
@@ -87,15 +112,15 @@ msgstr "Enviar programa malo"
 msgid "Error"
 msgstr "Error"
 
-#: mylab/templates/index.html:99
+#: mylab/templates/index.html:96
 msgid "Time is over!"
 msgstr "¡Se ha acabado el tiempo!"
 
-#: mylab/templates/index.html:102
+#: mylab/templates/index.html:99
 msgid "1 second"
 msgstr "1 segundo"
 
-#: mylab/templates/index.html:103
+#: mylab/templates/index.html:100
 msgid "NUM seconds"
 msgstr "NUM segundos"
 

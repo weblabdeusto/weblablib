@@ -1,4 +1,5 @@
-var socket = io.connect('http://' + document.domain + ':' + location.port);
+var namespace = '/mylab';
+var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + namespace);
 
 function clean() {
     $("#panel").hide();
@@ -6,7 +7,6 @@ function clean() {
     $("#timer").text(TIME_IS_OVER);
     running = false;
     currentTime = 0;
-    clearInterval(STATUS_INTERVAL);
     clearInterval(TIMER_INTERVAL);
 }
 
@@ -43,9 +43,13 @@ function sendProgram(code) {
     socket.emit('program', {code: code})
 }
 
-socket.on('program-state', function(data) {
+socket.on('board-status', function(data) {
     parseStatus(data);
-})
+});
+
+socket.on('on-task', function(data) {
+    console.log(data);
+});
 
 function logout() {
     $.post(LOGOUT_URL, {
@@ -58,37 +62,16 @@ function logout() {
 var HIDE_MESSAGES_BOX = null;
 
 function parseStatus(newStatus) {
-    if (newStatus.error == false) {
-        for (var i = 1; i < 11; i++) {
-            if(newStatus["lights"]["light-" + i]) {
-                $("#light_" + i + "_on").hide();
-                $("#light_" + i + "_off").show();
-            } else {
-                $("#light_" + i + "_off").hide();
-                $("#light_" + i + "_on").show();
-            }
+    for (var i = 1; i < 11; i++) {
+        if(newStatus["lights"]["light-" + i]) {
+            $("#light_" + i + "_on").hide();
+            $("#light_" + i + "_off").show();
+        } else {
+            $("#light_" + i + "_off").hide();
+            $("#light_" + i + "_on").show();
         }
-        $("#microcontroller_status").text(newStatus["microcontroller"]);
-    } else {
-        $("#error_messages_box").show();
-        $("#error_messages").text((new Date().toString()) + newStatus["message"]);
-
-        if (HIDE_MESSAGES_BOX != null) {
-            clearTimeout(HIDE_MESSAGES_BOX);
-        }
-
-        HIDE_MESSAGES_BOX = setTimeout(function() {
-            $("#error_messages_box").hide();
-        }, 10000);
     }
+    $("#microcontroller_status").text(newStatus["microcontroller"]);
 }
 
-var STATUS_INTERVAL = setInterval(function () {
-
-    $.get(STATUS_URL).done(parseStatus).fail(clean);
-
-}, 1000);
 var TIMER_INTERVAL = setInterval(updateTime, 1000);
-
-$.get(STATUS_URL).done(parseStatus);
-

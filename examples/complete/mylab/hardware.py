@@ -2,7 +2,9 @@ from __future__ import unicode_literals, print_function, division
 
 import os
 import time
-from mylab import weblab, redis
+from mylab import weblab, redis, socketio
+
+from flask_babel import gettext
 
 from weblablib import weblab_user
 
@@ -49,7 +51,8 @@ def start(client_data, server_data):
 
     for light in range(LIGHTS):
         redis.set('hardware:lights:{}'.format(light), 'off')
-    redis.set('hardware:microcontroller', 'empty')
+    redis.set('hardware:microcontroller:state', 'empty')
+    redis.delete('hardware:microcontroller:programming')
 
 @weblab.on_dispose
 def dispose():
@@ -72,7 +75,8 @@ def clean_resources():
     weblab_user.username in dispose())... we separate it. This way, this code can
     be called from outside using 'flask clean-resources'
     """
-    redis.set('hardware:microcontroller', 'empty')
+    redis.set('hardware:microcontroller:state', 'empty')
+    redis.delete('hardware:microcontroller:programming')
     print("Microcontroller restarted")
 
 
@@ -92,8 +96,49 @@ def switch_light(number, state):
 def is_light_on(number):
     return redis.get('hardware:lights:{}'.format(number)) == 'on'
 
-def get_microcontroller_state():
-    return redis.get('hardware:microcontroller')
+def hardware_status():
+    "Return the status of the board"
+    # A pipeline in Redis is a single connection, that run with
+    # transaction=True (the default), it runs all the commands in a single
+    # transaction. It's useful to get all the data in once and to peform
+    # atomic operations 
+    pipeline = redis.pipeline()
+
+    for light in range(LIGHTS):
+        pipeline.get('hardware:lights:{}'.format(light))
+    
+    pipeline.get('hardware:microcontroller:programming')
+    pipeline.get('hardware:microcontroller:state')
+
+    # Now it's run
+    results = pipeline.execute()
+
+    lights_data = {
+        # 'light-1': True
+    }
+
+    for pos, light_state in enumerate(results[0:LIGHTS]):
+        lights_data['light-{}'.format(pos+1)] = light_state == 'on'
+
+    programming, state = results[LIGHTS:]
+    if programming is not None:
+        microcontroller = gettext('Programming: %(step)s', step=programming)
+    elif state == 'empty':
+        microcontroller = gettext("Empty memory")
+    elif state == 'failed':
+        microcontroller = gettext("Programming failed")
+    elif state == 'programmed':
+        microcontroller = gettext("Programming worked!")
+    else:
+        microcontroller = gettext("Invalid state: %(state)s", state=state)
+
+    task_id = weblab_user.data.get('programming_task')
+    if task_id:
+        task = weblab.get_task(task_id)
+        if task:
+            print("Current programming task status: %s (error: %s; result: %s)" % (task.status, task.error, task.result))
+
+    return dict(lights=lights_data, microcontroller=microcontroller, time_left=weblab_user.time_left)
 
 @weblab.task()
 def program_device(code):
@@ -101,13 +146,13 @@ def program_device(code):
     if weblab_user.time_left < 10:
         print("************************************************************************")
         print("Error: typically, programming the device takes around 10 seconds. So if ")
-        print("the user has less than 10 secons to use the laboratory, don't start ")
+        print("the user has less than 10 seconds (%.2f) to use the laboratory, don't start " % weblab_user.time_left)
         print("this task. Otherwise, the user session will still wait until the task")
         print("finishes, delaying the time assigned by the administrator")
         print("************************************************************************")
         return {
             'success': False,
-            'reason': "Too few time"
+            'reason': "Too few time: {}".format(weblab_user.time_left)
         }
 
     print("************************************************************************")
@@ -116,16 +161,20 @@ def program_device(code):
     print("you can start, and it will be running in a different thread. In this ")
     print("case, this is lasting for 10 seconds from now ")
     print("************************************************************************")
-    if redis.get('hardware:microcontroller') == 'programming':
+    
+    if redis.set('hardware:microcontroller:programming', 0) == 0:
         # Just in case two programs are sent at the very same time
         return {
             'success': False,
             'reason': "Already programming"
         }
 
-    redis.set('hardware:microcontroller', 'programming')
-    for x in range(10):
+    socketio.emit('board-status', hardware_status(), namespace='/mylab')
+
+    for step in range(10):
         time.sleep(1)
+        redis.set('hardware:microcontroller:programming', step)
+        socketio.emit('board-status', hardware_status(), namespace='/mylab')
         print("Still programming...")
 
 
@@ -133,14 +182,22 @@ def program_device(code):
         print("************************************************************************")
         print("Oh no! It was a division-by-zero code! Expect an error!")
         print("************************************************************************")
-        redis.set('hardware:microcontroller', 'failed')
+        pipeline = redis.pipeline()
+        pipeline.set('hardware:microcontroller:state', 'failed')
+        pipeline.delete('hardware:microcontroller:programming')
+        pipeline.execute()
+        socketio.emit('board-status', hardware_status(), namespace='/mylab')
         10 / 0 # Force an exception to be raised
 
     print("************************************************************************")
     print("Yay! the robot has been programmed! Now you can retrieve the result ")
     print("************************************************************************")
-    redis.set('hardware:microcontroller', 'programmed')
+    pipeline = redis.pipeline()
+    pipeline.set('hardware:microcontroller:state', 'programmed')
+    pipeline.delete('hardware:microcontroller:programming')
+    pipeline.execute()
 
+    socketio.emit('board-status', hardware_status(), namespace='/mylab')
     return {
         'success': True
     }

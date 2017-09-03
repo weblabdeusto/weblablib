@@ -1,9 +1,10 @@
 import time
 
 from flask import Blueprint, url_for, render_template, jsonify, session, current_app, request
+from flask_socketio import emit
 
 from mylab import weblab, socketio
-from mylab.hardware import program_device, is_light_on, get_microcontroller_state, switch_light, LIGHTS
+from mylab.hardware import program_device, switch_light, hardware_status
 
 from weblablib import requires_active, requires_login, weblab_user, logout
 
@@ -28,46 +29,25 @@ def index():
 
     return render_template("index.html")
 
-@main_blueprint.route('/status')
-@requires_active
-def status():
-    "Return the status of the board"
-    lights = {}
-    microcontroller = {}
+###################################################################
+# 
+# 
+# Socket-IO management
+# 
 
-    for light in range(LIGHTS):
-        lights['light-{}'.format(light + 1)] = is_light_on(light)
+@socketio.on('connect', namespace='/mylab')
+def connect_handler():
+    emit('board-status', hardware_status(), namespace='/mylab')
 
-    microcontroller = get_microcontroller_state()
-
-    task_id = session.get('programming_task')
-    if task_id:
-        task = weblab.get_task(task_id)
-        if task:
-            current_app.logger.debug("Current programming task status: %s (error: %s; result: %s)", task.status, task.error, task.result)
-
-    return jsonify(error=False, lights=lights, microcontroller=microcontroller, time_left=weblab_user.time_left)
-
-@main_blueprint.route('/logout', methods=['POST'])
-@requires_login
-def logout_view():
-    if not _check_csrf():
-        return jsonify(error=True, message="Invalid JSON")
-
-    if weblab_user.active:
-        logout()
-
-    return jsonify(error=False)
-
-@socketio.on('lights')
+@socketio.on('lights', namespace='/mylab')
 def lights_event(data):
     state = data['state']
     number = data['number'] - 1
     switch_light(number, state)
-    return status()
+    emit('board-status', hardware_status(), namespace='/mylab')
 
 
-@socketio.on('program-state')
+@socketio.on('program', namespace='/mylab')
 def microcontroller(data):
     code = data.get('code') or "code"
 
@@ -86,11 +66,21 @@ def microcontroller(data):
     current_app.logger.debug(" - Result: {}".format(task.result))
     current_app.logger.debug(" - Error: {}".format(task.error))
 
-    session['programming_task'] = task.task_id
+    weblab_user.data['programming_task'] = task.task_id
 
-    return status()
+    emit('board-status', hardware_status(), namespace='/mylab')
 
 
+@main_blueprint.route('/logout', methods=['POST'])
+@requires_login
+def logout_view():
+    if not _check_csrf():
+        return jsonify(error=True, message="Invalid JSON")
+
+    if weblab_user.active:
+        logout()
+
+    return jsonify(error=False)
 
 #######################################################
 #

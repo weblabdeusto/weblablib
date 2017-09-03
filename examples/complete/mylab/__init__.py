@@ -1,7 +1,7 @@
 from __future__ import unicode_literals, print_function, division
 
 import time
-from flask import Flask, request, session
+from flask import Flask, request, session, has_request_context
 from flask_assets import Environment
 from flask_babel import Babel
 from flask_debugtoolbar import DebugToolbarExtension
@@ -72,10 +72,14 @@ def get_locale():
     """Defines what's the current language for the user. It uses different approaches"""
     supported_languages = [ translation.language for translation in babel.list_translations() ]
 
-    # If user accesses http://localhost:5000/?locale=es force it to Spanish, for example
-    locale = request.args.get('locale', None)
-    if locale not in supported_languages:
-        locale = None
+    locale = None
+    
+    # This is used also from tasks (which are not in a context environment)
+    if has_request_context():
+        # If user accesses http://localhost:5000/?locale=es force it to Spanish, for example
+        locale = request.args.get('locale', None)
+        if locale not in supported_languages:
+            locale = None
 
     # If not explicitly stated (?locale=something), use whatever WebLab-Deusto said
     if locale is None:
@@ -83,20 +87,20 @@ def get_locale():
         if locale not in supported_languages:
             locale = None
 
-    # Otherwise, check if something is stored in the session
     if locale is None:
-        locale = session.get('locale')
+        locale = weblab_user.data.get('locale')
 
     # Otherwise, check what the web browser is using (the web browser might state multiple
     # languages)
-    if locale is None:
-        locale = request.accept_languages.best_match(supported_languages)
+    if has_request_context():
+        if locale is None:
+            locale = request.accept_languages.best_match(supported_languages)
 
     # Otherwise... use the default one (English)
     if locale is None:
         locale = 'en'
 
     # Store the decision so next time we don't need to check everything again
-    session['locale'] = locale
+    weblab_user.data['locale'] = locale
     return locale
 

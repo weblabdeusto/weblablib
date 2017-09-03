@@ -90,7 +90,6 @@
         var CSRF = {{ session['csrf']|tojson }};
 
         var currentTime = Math.round({{ weblab_user.time_left }});
-        var STATUS_URL = "{{ url_for('.status') }}";
         var LOGOUT_URL = "{{ url_for('.logout_view') }}";
 
         // The .js code (in static) uses this message
