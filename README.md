@@ -17,11 +17,11 @@ WebLab-Deusto is an Open Source RLMS, and it has multiple ways ([see the docs](h
 In the case of Python, with the popular [Flask](http://flask.pocoo.org) microframework, **weblablib** is the wrapper used to create *unmanaged labs*.
 *Unmanaged labs* is a term used in WebLab-Deusto to refer laboratories where the authors develop the full stack (server, client, deployment), as opposed to *managed labs*.
 
-If you are familiar with Flask and with Web development, and want to be able to customize everything but not need to implement all the layers of authentication, administration, etc., this library would be very useful. Furthermore, this library allows you to develop remote laboratories for many environments (from regular computers with Linux to systems such as Raspberry Pi).
+If you are familiar with Flask and with Web development, and want to be able to customize everything but not need to implement all the layers of authentication, administration, etc., this library would be very useful. Furthermore, this library allows you to develop remote laboratories for many environments (from regular computers with Linux to systems such as Raspberry Pi). And it integrates very well with other Flask components such as [Flask-SocketIO](https://flask-socketio.readthedocs.io/), [Flask-SQLAlchemy](http://flask-sqlalchemy.pocoo.org/) for databases or [Flask-Assets](https://flask-assets.readthedocs.io/).
 
 ## Documentation
 
-Read the docs: https://docs.labsland.com/weblablib/
+Read the documentation: https://docs.labsland.com/weblablib/
 
 ## Installation
 

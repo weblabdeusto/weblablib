@@ -29,6 +29,8 @@ This example is explained in detail in the folder itself. However, the highlight
  * It shows a ``flask clean-resources`` script.
  * It comes with a ``gunicorn_start.sh`` and ``wsgi_app.py`` script, that you can see for how to deploy the laboratory.
 
+.. _examples_complete:
+
 Complete
 --------
 

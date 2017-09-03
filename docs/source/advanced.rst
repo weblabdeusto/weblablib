@@ -115,7 +115,91 @@ so as to not consume time of other users, and avoid starting tasks when the
 WebSockets with Flask-SocketIO
 ------------------------------
 
-asdf
+WebSockets are a technology that allows the server to *push* data to the client. This is very interesting from the remote laboratory perspective: you can push data from the server to the client, which is something that you may want many circumstances.
+
+So as to support ``Flask-SocketIO``, there are a couple of things you have to take into account, though:
+
+Threading model
+^^^^^^^^^^^^^^^
+
+``weblablib`` by default relies on the classic threading model, while ``Flask-SocketIO`` relies on gevent or eventlet. This means that, in a regular app you can simply do:
+
+.. code-block:: bash
+
+   $ flask run
+
+And it will run the threads, in the case of using ``Flask-SocketIO`` you must configure ``WEBLAB_NO_THREAD=True`` and run two separate processes. The first one, for cleaning resources and running tasks:
+
+.. code-block:: bash
+
+   $ flask weblab loop
+
+The second one, a modified version of ``flask run``, which is a simple script stored in a file such as ``run_debug.py`` like:
+
+.. code-block:: python
+
+	from gevent import monkey
+	monkey.patch_all()
+
+	import os
+	from mylab import create_app, socketio
+	app = create_app('development')
+	socketio.run(app)
+
+This way, one process will be running with ``gevent`` model, while ``flask weblab loop`` will behave as usual. 
+
+It is also important that when you initialize Flask-SocketIO, you use a message_queue:
+
+.. code-block:: python
+
+   socketio.init_app(app, message_queue='redis://', channel='mylab')
+
+This way, both processes will be able to exchange messages with the web browser.
+
+WebLab Tasks
+^^^^^^^^^^^^
+
+The support of SocketIO is perfectly compatible with WebLab Tasks, as long as the points covered in the previous section are taken into account.
+
+Authentication model
+^^^^^^^^^^^^^^^^^^^^
+
+``weblablib`` provides ``requires_active`` and ``requires_login``. However, these two methods are intended to be used in regular Flask views, which are typically short operations, and where the operations expect a regular HTTP response.
+
+In WebSockets, the model is different:
+ * Once you create a socket connection, it is virtually in the same thread on the server side until it is disconnected. It may happen that the user connects the WebSocket in the beginning (while he still has 2 minutes to use the laboratory), and then keep using the socket for more time. Using ``weblab_user`` will always return the same result since it is cached.
+ * The way to finish a connection is by calling ``disconnect``, not by returning an HTTP Response.
+
+For these reasons, ``weblablib`` provides the following three methods and properties:
+
+ * ``socket_requires_active``: it takes the real time, non cached information. It calls ``disconnect()`` if the user is not ``active``.
+ * ``socket_requires_login``: it takes the real time, non cached information. It calls ``disconnect()`` if the user is ``anonymous``.
+ * ``socket_weblab_user``: it behaves exactly as ``weblab_user``, but without caching the result. Everytime you call it, it will be calling Redis.
+
+This way, you may use:
+
+.. code-block:: python
+
+   from weblablib import socket_requires_active
+
+   @socketio.on('connect', namespace='/mylab')
+   @socket_requires_active
+   def connect_handler():
+       emit('board-status', hardware_status(), namespace='/mylab')
+
+   @socketio.on('lights', namespace='/mylab')
+   @socket_requires_active
+   def lights_event(data):
+       switch_light(data['number'] - 1, data['state'])
+       emit('board-status', hardware_status(), namespace='/mylab')
+
+This is guaranteed to work even if time passes between events.
+
+
+Example
+^^^^^^^
+
+In :ref:`examples_complete` you may find a complete example using Flask-SocketIO, tasks and the authentication model.
 
 Multiple laboratories in the same server
 ----------------------------------------
