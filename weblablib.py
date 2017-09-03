@@ -59,6 +59,14 @@ from flask import Blueprint, Response, jsonify, request, current_app, redirect, 
      url_for, g, session, after_this_request, render_template, Markup, \
      has_request_context
 
+try:
+    from flask_socketio import disconnect as socketio_disconnect
+except ImportError:
+    traceback.print_exc()
+    _FLASK_SOCKETIO = False
+else:
+    _FLASK_SOCKETIO = True
+
 __all__ = ['WebLab',
            'logout', 'poll',
            'weblab_user',
@@ -1217,14 +1225,13 @@ def poll():
         g.poll_requested = True
 
 
-def _weblab_user():
+def _weblab_user(cached=True):
     """
     Get the current user. Optionally, return the ExpiredUser if the current one expired.
 
     @active_only: if set to True, do not return a expired user (and None instead)
     """
-
-    if hasattr(g, 'weblab_user'):
+    if cached and hasattr(g, 'weblab_user'):
         return g.weblab_user
 
     # Cached: then use Redis
@@ -1241,6 +1248,9 @@ def _set_weblab_user_cache(user):
     return user
 
 weblab_user = LocalProxy(_weblab_user) # pylint: disable=invalid-name
+
+socket_weblab_user = LocalProxy(lambda : _weblab_user(cache=False))
+   
 
 def _current_task():
     task_id = getattr(g, '_weblab_task_id', None)
@@ -1279,6 +1289,38 @@ def requires_active(func):
             # If expired: send back to the original URL
             return redirect(weblab_user.back)
         return func(*args, **kwargs)
+    return wrapper
+
+def socket_requires_login(func):
+    """
+    Decorator. Requires the user to be a user (expired or active); otherwise it calls socketio_disconnect
+    """
+    if not _FLASK_SOCKETIO:
+        print("Warning: using socket_requires_active on {} but Flask-SOCKETIO was not properly imported. Nothing is done.".format(func))
+        return func
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if socket_weblab_user.is_anonymous:
+            socketio_disconnect()
+        return func(*args, **kwargs)
+
+    return wrapper
+
+def socket_requires_active(func):
+    """
+    Decorator. Requires the user to be an active user; otherwise it calls socketio_disconnect
+    """
+    if not _FLASK_SOCKETIO:
+        print("Warning: using socket_requires_active on {} but Flask-SOCKETIO was not properly imported. Nothing is done.".format(func))
+        return func
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not socket_weblab_user.active:
+            socketio_disconnect()
+        return func(*args, **kwargs)
+
     return wrapper
 
 def logout():
