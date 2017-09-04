@@ -28,6 +28,7 @@ If you are familiar with Flask and with Web development (while not necessarily),
    quickstart
    advanced
    examples
+   license
    configuration
    changelog
 

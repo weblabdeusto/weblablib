@@ -319,10 +319,13 @@ class WebLab(object):
         elif self._callback_url.endswith('/'):
             print("Note: your callback URL ({}) ends with '/'. It is discouraged".format(self._callback_url), file=sys.stderr)
 
+        doc_link = 'https://docs.labsland.com/weblablib/'
+
         @self._app.route(self._callback_url + '/<session_id>')
         def weblab_callback_url(session_id):
             if self._initial_url is None:
                 print("ERROR: You MUST use @weblab.initial_url to point where the WebLab users should be redirected to.", file=sys.stderr)
+                print("Check the documentation: {}.".format(DOC_LINK), file=sys.stderr)
                 return "ERROR: laboratory not properly configured, didn't call @weblab.initial_url", 500
 
             if self._redis_manager.session_exists(session_id):
@@ -443,6 +446,11 @@ class WebLab(object):
         @self._app.context_processor
         def weblab_context_processor():
             return dict(weblab_poll_script=weblab_poll_script, weblab_user=weblab_user, weblab=self)
+
+        @self._app.after_request
+        def after_request(response):
+            response.headers['powered-by'] = doc_link
+            return response
 
         if hasattr(app, 'cli'):
             click.disable_unicode_literals_warning = True
