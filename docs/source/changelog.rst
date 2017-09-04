@@ -12,7 +12,12 @@ General
 ^^^^^^^
 
  * Added ``WEBLAB_NO_THREAD`` which is equivalent to ``WEBLAB_AUTOCLEAN_THREAD=False`` and ``WEBLAB_TASK_THREADS_PROCESS=0``.
+
+Tasks
+^^^^^
+
  * A ``WebLabTask`` supports ``.join()`` method. It defaults to ``.join(timeout=None, error_on_timeout=True)``,  raising an error, but can be configured with those parameters.
+ * It also supports ``run_sync()``, with the optional named parameter ``timeout``. This guarantees that you can run tasks in a background process such as ``flask weblab loop``.
 
 WebSockets
 ^^^^^^^^^^
@@ -37,7 +42,7 @@ CLI changes
 
   * Similarly to other Flask projects, all the ``weblablib`` commands are in a single command group called ``weblab``. This way, in case of using multiple libraries which include their own commands (such as Flask-Migrate or Flask-Assets), the number of commands in the ``--help`` are low, and there is a low chance of collision (e.g., you might be using a celery-like system that also has a ``run-tasks`` command or a ``loop`` command). Therefore, since this version:
 
- 
+
 .. tabularcolumns:: |p{6.5cm}|p{8.5cm}|
 
 ================================= =========================================

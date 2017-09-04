@@ -740,19 +740,24 @@ class LongTaskTest(BaseSessionWebLabTest):
         return config
 
     def lab(self):
-        task = self.current_task.delay()
-        return str(task.task_id)
+        if self.run_delayed:
+            task_object = self.current_task.delay()
+        else:
+            task_object = self.current_task.run_sync(timeout=self.sync_timeout)
+        return str(task_object.task_id)
 
     def task(self):
-        time.sleep(0.6)
+        time.sleep(self.sleep_time)
         return 0
 
     def test_long_task(self):
+        self.sleep_time = 0.6
         self.weblab.cleaner_thread_interval = 0.1
+        self.run_delayed = True
         launch_url1, session_id1 = self.new_user()
         response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
         task_id = response
-        
+
         max_time = 3
         t0 = time.time()
         while True:
@@ -776,6 +781,31 @@ class LongTaskTest(BaseSessionWebLabTest):
         self.client.get('/logout')
         time.sleep(0.2) # So other thread calls clean
         self.dispose()
+        self.weblab._cleanup()
+
+    def test_run_sync_short(self):
+        self.sleep_time = 0.1
+        self.weblab.cleaner_thread_interval = 0.1
+        self.run_delayed = False
+        self.sync_timeout = None # Forever
+        launch_url1, session_id1 = self.new_user()
+        task_id = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+        task = self.weblab.get_task(task_id)
+        self.assertTrue(task.done)
+        self.weblab._cleanup()
+
+    def test_run_sync_long(self):
+        self.sleep_time = 0.4
+        self.weblab.cleaner_thread_interval = 0.1
+        self.run_delayed = False
+        self.sync_timeout = 0.1 # Forever
+        launch_url1, session_id1 = self.new_user()
+        task_id = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+        task = self.weblab.get_task(task_id)
+        self.assertFalse(task.done)
+        task.join()
+        self.assertTrue(task.done)
+        self.weblab._cleanup()
 
 class DisposeErrorTest(BaseSessionWebLabTest):
 
@@ -786,9 +816,9 @@ class DisposeErrorTest(BaseSessionWebLabTest):
         raise Exception("Testing error in the dispose method")
 
     def test_task_fail(self):
-        # New user 
+        # New user
         launch_url1, session_id1 = self.new_user()
-        
+
         with StdWrap():
             self.dispose()
 

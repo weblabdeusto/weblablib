@@ -1927,12 +1927,45 @@ class _TaskWrapper(object):
         self._redis_manager = weblab._redis_manager
 
     def __call__(self, *args, **kwargs):
+        """Runs the function in the same way, directly, without catching errors"""
         return self._func(*args, **kwargs)
 
     def delay(self, *args, **kwargs):
+        """Starts the function in a thread or in another process.
+        It returns a WebLabTask object"""
         session_id = _current_session_id()
         task_id = self._redis_manager.new_task(session_id, self._name, args, kwargs)
         return WebLabTask(self._weblab, task_id)
+
+    def run_sync(self, *args, **kwargs):
+        """
+        Runs the function in another thread. This is useful if for example you
+        are running tasks in a single external process and you want to make sure
+        that you run the method in that process. For example, take that you have
+        a gunicorn server with 10 workers (10 processes). And you need to access
+        a local hardware resource. You may have a single ``flask weblab loop``
+        process, and configure weblablib so all the tasks are run there (by setting
+        ``WEBLAB_NO_THREAD=True``). Then, in the views or in the ``on_start`` or
+        ``on_dispose``, you might run:
+
+        @weblab.task
+        def my_func(a, b):
+            # do something with a local resource, like a USB connection
+            return a + b
+
+        task_result = my_func.run_async(5, 6)
+        print(task_result.result) # displays 11
+
+        Internally this code is guaranteed to run in the ``loop`` process.
+
+        :param timeout: If provided a timeout=<time in seconds>, it will wait only
+                        for that time. After that, the process will continue, but
+                        the ``run_async`` will finish returning the task object.
+        """
+        timeout = kwargs.pop('timeout', None)
+        task_object = self.delay(*args, **kwargs)
+        task_object.join(timeout=timeout, error_on_timeout=False)
+        return task_object
 
 class WebLabTask(object):
     """
