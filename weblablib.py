@@ -325,7 +325,7 @@ class WebLab(object):
         def weblab_callback_url(session_id):
             if self._initial_url is None:
                 print("ERROR: You MUST use @weblab.initial_url to point where the WebLab users should be redirected to.", file=sys.stderr)
-                print("Check the documentation: {}.".format(DOC_LINK), file=sys.stderr)
+                print("Check the documentation: {}.".format(doc_link), file=sys.stderr)
                 return "ERROR: laboratory not properly configured, didn't call @weblab.initial_url", 500
 
             if self._redis_manager.session_exists(session_id):
