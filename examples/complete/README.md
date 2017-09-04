@@ -142,6 +142,12 @@ You will need to create a virtual environment, and then install all the requirem
  $ pip install -r requirements.txt
 ```
 
+If you are running ``Python 2``, install also:
+
+```shell
+ $ pip install gevent-websocket
+```
+
 ### Running it for development
 
 So as to run it, in Linux / Mac OS X:

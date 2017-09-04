@@ -59,6 +59,10 @@ Or asynchronously (common when it's tasks) and play with the ``WebLabTask`` obje
    task.result # the result of the function
    task.error # the exception data, if an exception happened
 
+   task.join(timeout=5, error_on_timeout=False) # wait 5 seconds, otherwise do nothing
+   task.join(timeout=5, error_on_timeout=True) # wait 5 seconds, otherwise raise error
+   task.join() # wait until it finishes
+
 If you store the ``task.task_id``, you can retrieve the task in other views or later on:
 
 .. code-block:: python
@@ -71,6 +75,31 @@ If you store the ``task.task_id``, you can retrieve the task in other views or l
    # the result. You can also run:
    if task.done:
        print(task.result)
+
+
+You can also block the current thread until the task is run, by running:
+
+.. code-block:: python
+
+   task = program_device.run_sync()
+
+   # or 
+
+   task = program_device.run_sync(timeout=5)
+
+   # then, as in any task:
+
+   task.result
+   task.error
+
+This is essentially equivalent to do:
+
+.. code-block:: python
+
+   task = program_device.delay()
+   task.join(timeout=5)
+
+The reason for doing this is for making sure that certain code runs in the task threads. This can be useful for resources, as explained in :ref:`advanced_proceses_resources`.
 
 At any point (including ``on_dispose``), you can see what tasks are still running:
 
@@ -128,13 +157,7 @@ Threading model
 
    $ flask run
 
-And it will run the threads, in the case of using ``Flask-SocketIO`` you must configure ``WEBLAB_NO_THREAD=True`` and run two separate processes. The first one, for cleaning resources and running tasks:
-
-.. code-block:: bash
-
-   $ flask weblab loop
-
-The second one, a modified version of ``flask run``, which is a simple script stored in a file such as ``run_debug.py`` like:
+And it will run the threads. When using ``Flask-SocketIO``, you need to run a modified version of ``flask run``, which is a simple script stored in a file such as ``run_debug.py`` like:
 
 .. code-block:: python
 
@@ -146,9 +169,17 @@ The second one, a modified version of ``flask run``, which is a simple script st
 	app = create_app('development')
 	socketio.run(app)
 
-This way, one process will be running with ``gevent`` model, while ``flask weblab loop`` will behave as usual. 
+This way, one process will be running with ``gevent`` model.
 
-It is also important that when you initialize Flask-SocketIO, you use a message_queue:
+Additionally, you can optionally run another process: 
+
+.. code-block:: bash
+
+   $ flask weblab loop
+   
+This process does not need to use gevent or eventlet. It may, but it is not required.
+
+If you use a second process (``flask weblab loop``), it is important that when you initialize Flask-SocketIO, you use a message_queue:
 
 .. code-block:: python
 
@@ -159,7 +190,7 @@ This way, both processes will be able to exchange messages with the web browser.
 WebLab Tasks
 ^^^^^^^^^^^^
 
-The support of SocketIO is perfectly compatible with WebLab Tasks, as long as the points covered in the previous section are taken into account.
+The support of SocketIO is perfectly compatible with WebLab Tasks (both in the same process or in a different one), as long as the points covered in the previous section are taken into account.
 
 Authentication model
 ^^^^^^^^^^^^^^^^^^^^
@@ -317,7 +348,7 @@ Processes vs. threads
 
 By default, weblablib creates a set of threads per process run, which are running tasks and cleaning threads. By default, 3 threads are dedicated to tasks, and 1 to cleaning expired sessions.
 
-So if you run:
+So if you run (not using Flask-SocketIO):
 
 .. code-block:: shell
 
@@ -367,6 +398,71 @@ These two processes end immediately. You can run them in a loop outside in a she
 
 This way, the ``gunicorn`` processes will only manage web requests, and the external processes will run the tasks and clean expired users.
 
+.. _advanced_proceses_resources:
+
+Using resources in the same process
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you use resources such as a serial port or a USB port, you may want that everything related to it is running in the same process. This is incompatible with running gunicorn with multiple workers. However, you may be able to achieve it by running things always in ``flask weblab loop``. For example:
+
+.. code-block:: python
+
+   # Imagine a connection to a USB or similar
+   resource_manager = None
+
+   @weblab.on_start
+   def on_start(client_data, server_data):
+       global resource_manager
+       # Or "acquire" or similar:
+       resource_manager = MyResource()
+       resource_manager.open() 
+
+   @weblab.on_dispose
+   def on_dispose():
+       global resource_manager
+       resource_manager.close()
+
+This code, if multiple proceses is run, has several problems:
+
+ * ``on_start`` will be called in a gunicorn process, and the resource will be created and ``acquired``.
+ * ``on_dispose``  might be called by a gunicorn process (in a request coming from weblab). But it might be run from *other* gunicorn process. Or it may be called by a ``flask weblab loop`` process if you're executing any. In any of these cases:
+
+   * ``resource_manager`` will be ``None``, and therefore an exception will raise
+   * the resource is open in other process, so it might not be possible to re-acquire the resource for another user.
+
+To avoid this problem, there are two options:
+
+ 1. You use ``gevent`` or ``eventlet`` as you can see in the documentation related to ``Flask-SocketIO`` (but without need of ``Flask-SocketIO``). Then you run gunicorn with a single worker. The process should work, since the resource will always be in the same process.
+ 1. You set ``WEBLAB_NO_THREAD=True``, and run in a different process ``flask weblab loop``. Then you change your code to the following:
+
+.. code-block:: python
+
+   # Imagine a connection to a USB or similar
+   resource_manager = None
+
+   @weblab.on_start
+   def on_start(client_data, server_data):
+       initialize_resource.run_sync()
+
+   @weblab.on_dispose
+   def on_dispose():
+       clean_resource.run_sync()
+
+   @weblab.task()
+   def initialize_resource():
+       global resource_manager
+       # Or "acquire" or similar:
+       resource_manager = MyResource()
+       resource_manager.open() 
+
+   @weblab.task()
+   def clean_resource():
+       global resource_manager
+       resource_manager.close()
+      
+
+The ``run_sync`` guarantees that it will be run by a WebLab Task worker, but due to the ``WEBLAB_NO_THREAD=True``, there will be no thread doing it in gunicorn and it will be run in the ``flask weblab loop`` process. ``run_sync`` will wait until the task finishes, so the behavior is the same, but guaranteeing that it's in a single process.
+
 Base URL
 --------
 
@@ -409,6 +505,4 @@ locale should be similar to:
             locale = 'en'
         session['locale'] = locale
         return locale
-
-*New in weblablib 0.3*
 
