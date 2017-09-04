@@ -4,6 +4,7 @@ import json
 import time
 import base64
 import datetime
+import requests
 import threading
 
 import six
@@ -843,7 +844,35 @@ class StartErrorTest(BaseSessionWebLabTest):
         finally:
             weblablib._dispose_user = old_dispose_user
 
-class CLITest(BaseWebLabTest):
+class BaseCLITest(BaseSessionWebLabTest):
+
+    def setUp(self):
+        super(BaseCLITest, self).setUp()
+
+        json_library = json
+        class FakeResponse(object):
+            def __init__(self, json_contents):
+                self.json_contents = json_contents
+
+            def json(self):
+                return self.json_contents
+
+        class FakeRequests(object):
+            @staticmethod
+            def post(url, json, auth):
+                json_contents = json_library.dumps(json)
+                rv = self.client.post('/' + url.split('/', 3)[-1], data=json_contents, headers=self.auth_headers)
+                json_contents = self.get_json(rv)
+                return FakeResponse(json_contents)
+            
+        weblablib.requests = FakeRequests
+
+    def tearDown(self):
+        super(BaseCLITest, self).tearDown()
+        weblablib.requests = requests
+
+
+class CLITest(BaseCLITest):
 
     def test_cli_flow(self):
         runner = CliRunner()
@@ -898,7 +927,7 @@ class CLITest(BaseWebLabTest):
         result = runner.invoke(self.app.cli, ["weblab", "loop"])
         self.assertEquals(result.exit_code, 0)
 
-class CLIFailTest(BaseWebLabTest):
+class CLIFailTest(BaseCLITest):
     def on_start(self, client_data, server_data):
         raise Exception("Error initializing laboratory")
 

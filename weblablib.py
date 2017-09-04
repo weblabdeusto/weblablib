@@ -49,6 +49,7 @@ import base64
 import pickle
 import signal
 import datetime
+import requests
 import threading
 import traceback
 import webbrowser
@@ -460,171 +461,182 @@ class WebLab(object):
             response.headers['powered-by'] = doc_link
             return response
 
-        if hasattr(app, 'cli'):
-            click.disable_unicode_literals_warning = True
-            @app.cli.group('weblab')
-            def weblab_cli():
-                """WebLab-Deusto related operations: initialize new sessions for development, run tasks, etc."""
-                pass
+        click.disable_unicode_literals_warning = True
+        @app.cli.group('weblab')
+        def weblab_cli():
+            """WebLab-Deusto related operations: initialize new sessions for development, run tasks, etc."""
+            pass
 
-            @weblab_cli.command('clean-expired-users')
-            def clean_expired_users():
-                """
-                Clean expired users.
+        @weblab_cli.command('clean-expired-users')
+        def clean_expired_users():
+            """
+            Clean expired users.
 
-                By default, a set of threads will be doing this, but you can also run it manually and
-                disable the threads.
-                """
-                self.clean_expired_users()
+            By default, a set of threads will be doing this, but you can also run it manually and
+            disable the threads.
+            """
+            self.clean_expired_users()
 
-            @weblab_cli.command('run-tasks')
-            def run_tasks():
-                """
-                Run planned tasks.
+        @weblab_cli.command('run-tasks')
+        def run_tasks():
+            """
+            Run planned tasks.
 
-                By default, a set of threads will be doing this, but you can run the tasks manually in
-                external processes.
-                """
-                self.run_tasks()
+            By default, a set of threads will be doing this, but you can run the tasks manually in
+            external processes.
+            """
+            self.run_tasks()
 
-            @weblab_cli.command('loop')
-            @click.option('--threads', default=5, help="Number of threads")
-            @click.option('--reload/--no-reload', default=None, help="Reload as code changes. Defaults to whether the app is in FLASK_DEBUG mode")
-            def loop(threads, reload):
-                """
-                Run planned tasks and clean expired users, permanently.
-                """
-                if reload is None:
-                    reload = current_app.debug
+        @weblab_cli.command('loop')
+        @click.option('--threads', default=5, help="Number of threads")
+        @click.option('--reload/--no-reload', default=None, help="Reload as code changes. Defaults to whether the app is in FLASK_DEBUG mode")
+        def loop(threads, reload):
+            """
+            Run planned tasks and clean expired users, permanently.
+            """
+            if reload is None:
+                reload = current_app.debug
 
-                def run_loop():
-                    if reload:
-                        print("Running with reloader. Don't use this in production mode.")
-                    self.loop(int(threads), reload)
-
+            def run_loop():
                 if reload:
-                    from werkzeug.serving import run_with_reloader
-                    run_with_reloader(run_loop)
-                else:
-                    run_loop()
+                    print("Running with reloader. Don't use this in production mode.")
+                self.loop(int(threads), reload)
 
-            @weblab_cli.group()
-            def fake():
-                """Fake user management.
+            if reload:
+                from werkzeug.serving import run_with_reloader
+                run_with_reloader(run_loop)
+            else:
+                run_loop()
 
-                With this interface, you can test your laboratory without WebLab-Deusto. It implements the same
-                methods used by WebLab-Deusto (create new user, check status, kick out user), from a command
-                line interface. The "new" command has several parameters for changing language, user name, etc.
-                """
-                pass
+        @weblab_cli.group()
+        def fake():
+            """Fake user management.
 
-            @fake.command('new')
-            @click.option('--name', default='John Smith', help="First and last name")
-            @click.option('--username', default='john.smith', help="Username passed")
-            @click.option('--username-unique', default='john.smith@institution', help="Unique username passed")
-            @click.option('--assigned-time', default=300, help="Time in seconds passed to the laboratory")
-            @click.option('--back', default='http://weblab.deusto.es', help="URL to send the user back")
-            @click.option('--locale', default='en', help="Language")
-            @click.option('--experiment-name', default='mylab', help="Experiment name")
-            @click.option('--category-name', default='Lab Experiments', help="Category name (of the experiment)")
-            @click.option('--dont-open-browser', is_flag=True, help="Do not open the fake user in a web browser")
-            def fake_user(name, username, username_unique, assigned_time, back, locale, experiment_name, category_name, dont_open_browser):
-                """
-                Create a fake WebLab-Deusto user session.
+            With this interface, you can test your laboratory without WebLab-Deusto. It implements the same
+            methods used by WebLab-Deusto (create new user, check status, kick out user), from a command
+            line interface. The "new" command has several parameters for changing language, user name, etc.
+            """
+            pass
 
-                This command creates a new user session and stores the session in disk, so you
-                can use other commands to check its status or delete it.
-                """
-                assigned_time = float(assigned_time)
+        def _weblab_api_request(url_name, json, session_id=None):
+            if session_id:
+                url = url_for(url_name, session_id=session_id, _external=True)
+            else:
+                url = url_for(url_name, _external=True)
+            weblab_username = current_app.config.get('WEBLAB_USERNAME')
+            weblab_password = current_app.config.get('WEBLAB_PASSWORD')
+            response = requests.post(url, json=json, auth=(weblab_username, weblab_password))
+            return response.json()
 
-                start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
+        @fake.command('new')
+        @click.option('--name', default='John Smith', help="First and last name")
+        @click.option('--username', default='john.smith', help="Username passed")
+        @click.option('--username-unique', default='john.smith@institution', help="Unique username passed")
+        @click.option('--assigned-time', default=300, help="Time in seconds passed to the laboratory")
+        @click.option('--back', default='http://weblab.deusto.es', help="URL to send the user back")
+        @click.option('--locale', default='en', help="Language")
+        @click.option('--experiment-name', default='mylab', help="Experiment name")
+        @click.option('--category-name', default='Lab Experiments', help="Category name (of the experiment)")
+        @click.option('--dont-open-browser', is_flag=True, help="Do not open the fake user in a web browser")
+        def fake_user(name, username, username_unique, assigned_time, back, locale, experiment_name, category_name, dont_open_browser):
+            """
+            Create a fake WebLab-Deusto user session.
 
-                request_data = {
-                    'client_initial_data': {},
-                    'server_initial_data': {
-                        'priority.queue.slot.start': start_time,
-                        'priority.queue.slot.length': assigned_time,
-                        'request.username': username,
-                        'request.full_name': name,
-                        'request.username.unique': username_unique,
-                        'request.locale': locale,
-                        'request.experiment_id.experiment_name': experiment_name,
-                        'request.experiment_id.category_name': category_name,
-                    },
-                    'back': back,
-                }
+            This command creates a new user session and stores the session in disk, so you
+            can use other commands to check its status or delete it.
+            """
+            assigned_time = float(assigned_time)
 
-                result = _process_start_request(request_data)
-                if 'url' in result:
-                    print()
-                    print("Congratulations! The session is started")
-                    print()
-                    print("Open: {}".format(result['url']))
-                    print()
-                    print("Session identifier: {}\n".format(result['session_id']))
-                    open(".fake_weblab_user_session_id", 'w').write(result['session_id'])
-                    print("Now you can make calls as if you were WebLab-Deusto (no argument needed):")
-                    print(" - flask weblab fake status")
-                    print(" - flask weblab fake dispose")
-                    print()
-                    if not dont_open_browser:
-                        webbrowser.open(result['url'])
-                else:
-                    print()
-                    print("Error processing request: {}".format(result['message']))
-                    print()
+            start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
 
-            @fake.command('status')
-            def fake_status():
-                """
-                Check status of a fake user.
+            request_data = {
+                'client_initial_data': {},
+                'server_initial_data': {
+                    'priority.queue.slot.start': start_time,
+                    'priority.queue.slot.length': assigned_time,
+                    'request.username': username,
+                    'request.full_name': name,
+                    'request.username.unique': username_unique,
+                    'request.locale': locale,
+                    'request.experiment_id.experiment_name': experiment_name,
+                    'request.experiment_id.category_name': category_name,
+                },
+                'back': back,
+            }
+            
+            result = _weblab_api_request('weblab._start_session', request_data)
 
-                Once you create a user with flask "weblab fake new", you can use this command to
-                simulate the status method of WebLab-Deusto and see what it would return.
-                """
-                if not os.path.exists('.fake_weblab_user_session_id'):
-                    print("Session not found. Did you call 'flask weblab fake new' first?")
-                    return
-                session_id = open('.fake_weblab_user_session_id').read()
-                status_time = _status_time(session_id)
-                print(self._redis_manager.get_user(session_id))
-                print("Should finish: {}".format(status_time))
+            if 'url' in result:
+                print()
+                print("Congratulations! The session is started")
+                print()
+                print("Open: {}".format(result['url']))
+                print()
+                print("Session identifier: {}\n".format(result['session_id']))
+                open(".fake_weblab_user_session_id", 'w').write(result['session_id'])
+                print("Now you can make calls as if you were WebLab-Deusto (no argument needed):")
+                print(" - flask weblab fake status")
+                print(" - flask weblab fake dispose")
+                print()
+                if not dont_open_browser:
+                    webbrowser.open(result['url'])
+            else:
+                print()
+                print("Error processing request: {}".format(result['message']))
+                print()
 
-            @fake.command('dispose')
-            def fake_dispose():
-                """
-                End a session of a fake user.
+        @fake.command('status')
+        def fake_status():
+            """
+            Check status of a fake user.
 
-                Once you create a user with 'flask weblab fake new', you can use this command to
-                simulate the dispose method of WebLab-Deusto to kill the current session.
-                """
-                if not os.path.exists('.fake_weblab_user_session_id'):
-                    print("Session not found. Did you call 'flask weblab fake new' first?")
-                    return
-                session_id = open('.fake_weblab_user_session_id').read()
-                print(self._redis_manager.get_user(session_id))
-                try:
-                    _dispose_user(session_id, waiting=True)
-                except _NotFoundError:
-                    print("Not found")
-                else:
-                    print("Deleted")
+            Once you create a user with flask "weblab fake new", you can use this command to
+            simulate the status method of WebLab-Deusto and see what it would return.
+            """
+            if not os.path.exists('.fake_weblab_user_session_id'):
+                print("Session not found. Did you call 'flask weblab fake new' first?")
+                return
+            session_id = open('.fake_weblab_user_session_id').read()
+            status_time = _status_time(session_id)
+            print(self._redis_manager.get_user(session_id))
+            print("Should finish: {}".format(status_time))
 
-                if os.path.exists('.fake_weblab_user_session_id'):
-                    os.remove('.fake_weblab_user_session_id')
+        @fake.command('dispose')
+        def fake_dispose():
+            """
+            End a session of a fake user.
 
-            if not self._app.config.get('SERVER_NAME'):
-                if 'new' in sys.argv and 'fake' in sys.argv:
-                    server_name = os.environ.get('SERVER_NAME')
-                    default_server_name = 'localhost:5000'
-                    if not server_name:
-                        print(file=sys.stderr)
-                        print("Note: No SERVER_NAME provided; using {!r} If you want other, run:".format(default_server_name), file=sys.stderr)
-                        print("      $ export SERVER_NAME=localhost:5001", file=sys.stderr)
-                        print(file=sys.stderr)
-                        server_name = default_server_name
+            Once you create a user with 'flask weblab fake new', you can use this command to
+            simulate the dispose method of WebLab-Deusto to kill the current session.
+            """
+            if not os.path.exists('.fake_weblab_user_session_id'):
+                print("Session not found. Did you call 'flask weblab fake new' first?")
+                return
+            session_id = open('.fake_weblab_user_session_id').read()
+            print(self._redis_manager.get_user(session_id))
 
-                    self._app.config['SERVER_NAME'] = server_name
+            request_data = {
+                'action': 'delete',
+            }
+            result = _weblab_api_request('weblab._dispose_experiment', session_id=session_id, json=request_data)
+
+            if os.path.exists('.fake_weblab_user_session_id'):
+                os.remove('.fake_weblab_user_session_id')
+
+            print(result['message'])
+
+        if not self._app.config.get('SERVER_NAME'):
+            if 'new' in sys.argv and 'fake' in sys.argv:
+                server_name = os.environ.get('SERVER_NAME')
+                default_server_name = 'localhost:5000'
+                if not server_name:
+                    print(file=sys.stderr)
+                    print("Note: No SERVER_NAME provided; using {!r} If you want other, run:".format(default_server_name), file=sys.stderr)
+                    print("      $ export SERVER_NAME=localhost:5001", file=sys.stderr)
+                    print(file=sys.stderr)
+                    server_name = default_server_name
+
+                self._app.config['SERVER_NAME'] = server_name
 
         if self._app.config.get('WEBLAB_NO_THREAD', False):
             if self._app.config.get('WEBLAB_AUTOCLEAN_THREAD', False):
