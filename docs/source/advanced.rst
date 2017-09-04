@@ -232,6 +232,34 @@ Example
 
 In :ref:`examples_complete` you may find a complete example using Flask-SocketIO, tasks and the authentication model.
 
+
+Running in production
+^^^^^^^^^^^^^^^^^^^^^
+
+For running Flask-SocketIO, you need ``gevent`` or ``eventlet``. If you use ``eventlet``, you must run ``gunicorn`` in the following way:
+
+.. code-block:: bash
+
+   gunicorn --bind 127.0.0.1:8080 -k eventlet -w 1 wsgi_app:application
+
+
+The key is ``-k eventlet`` (so it uses eventlet) and ``-w 1`` (only one worker).
+
+For ``gevent``, in Python 2 you may install ``gevent-websocket`` and run:
+
+.. code-block:: bash
+
+   gunicorn --bind 127.0.0.1:8080 -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 wsgi_app:application
+
+Or, in Python 3:
+
+.. code-block:: bash
+
+   gunicorn --bind 127.0.0.1:8080 -k gevent -w 1 wsgi_app:application
+
+
+Check the ``gunicorn_start.sh`` example in the examples for further details (such as how to create the ``wsgi_app.py``).
+
 Multiple laboratories in the same server
 ----------------------------------------
 
@@ -433,7 +461,8 @@ This code, if multiple proceses is run, has several problems:
 To avoid this problem, there are two options:
 
  1. You use ``gevent`` or ``eventlet`` as you can see in the documentation related to ``Flask-SocketIO`` (but without need of ``Flask-SocketIO``). Then you run gunicorn with a single worker. The process should work, since the resource will always be in the same process.
- 1. You set ``WEBLAB_NO_THREAD=True``, and run in a different process ``flask weblab loop``. Then you change your code to the following:
+
+ 2. You set ``WEBLAB_NO_THREAD=True``, and run in a different process ``flask weblab loop``. Then you change your code to the following:
 
 .. code-block:: python
 
