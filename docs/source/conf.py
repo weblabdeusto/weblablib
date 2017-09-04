@@ -46,8 +46,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'weblablib'
-copyright = u'2017, WebLab-Deusto team'
-author = u'WebLab-Deusto team'
+copyright = u'2017, LabsLand team'
+author = u'LabsLand team'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -222,7 +222,7 @@ latex_elements = {
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
     (master_doc, 'weblablib.tex', u'weblablib Documentation',
-     u'WebLab-Deusto team', 'manual'),
+     u'LabsLand team', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of

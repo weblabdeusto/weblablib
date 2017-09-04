@@ -32,6 +32,11 @@ provides:
 Please, check the examples in the examples folder in the github repo.
 """
 
+# Copyright 2017 onwards LabsLand Experimentia S.L.
+# This software is licensed under the GNU AGPL v3:
+# GNU Affero General Public License version 3 (see the file LICENSE)
+# Read in the documentation about the license
+
 from __future__ import unicode_literals, print_function, division
 
 import os
@@ -77,6 +82,9 @@ __all__ = ['WebLab',
            'WebLabError', 'NoContextError', 'InvalidConfigError',
            'WebLabNotInitializedError', 'TimeoutError',
            'CurrentUser', 'AnonymousUser', 'ExpiredUser']
+
+__version__ = '0.4'
+__license__ = 'GNU Affero General Public License v3 http://www.gnu.org/licenses/agpl.html'
 
 class ConfigurationKeys(object):
     """
