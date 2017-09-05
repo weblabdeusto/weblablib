@@ -194,24 +194,29 @@ class WebLab(object):
     """
     WebLab is a Flask extension that manages the settings (redis, session, etc.), and
     the registration of certain methods (e.g., on_start, etc.)
+
+    Initializes the object. All the parameters are optional.
+
+    :param app: the Flask application
+
+    :param base_url: the base URL to be used. By default, the WebLab URLs will be
+                     ``/weblab/sessions/<something>``.  If you provide ``base_url = '/foo'``, then
+                     it will be listening in ``/foo/weblab/sessions/<something>``. This is the 
+                     route that will be used in the Flask application (so if your application
+                     is deployed in ``/bar``, then it will be 
+                     ``/bar/foo/weblab/sessions/<something>``. This URLs do NOT need to be 
+                     publicly available (they can be only available to WebLab-Deusto if you
+                     want, by playing with the firewall or so). You can also configure it with 
+                     ``WEBLAB_BASE_URL`` in the Flask configuration.
+
+    :param callback_url: a URL that WebLab will implement that must be public. For example, 
+                         ``/mylab/callback/``, this URL must be available to the final user. 
+                         The user will be redirected there with a token and this code will 
+                         redirect him to the initial_url. You can also configure it with 
+                         ``WEBLAB_CALLBACK_URL`` in configuration.
     """
+
     def __init__(self, app=None, callback_url=None, base_url=None):
-        """
-        Initializes the object. All the parameters are optional.
-
-        @app: the Flask application
-
-        @base_url: the base URL to be used. By default, the WebLab URLs will be '/weblab/sessions/<something>'.
-        If You provide base_url = '/foo', then it will be listening in '/foo/weblab/sessions/<something>'.
-        This is the route that will be used in the Flask application (so if your application is deployed in /bar,
-        then it will be /bar/foo/weblab/sessions/<something> . This URLs do NOT need to be publicly available (they
-        can be only available to WebLab-Deusto if you want, by playing with the firewall or so). You can also configure
-        it with WEBLAB_BASE_URL in the Flask configuration.
-
-        @callback_url: a URL that WebLab will implement that must be public. For example, '/mylab/callback/', this URL
-        must be available to the final user. The user will be redirected there with a token and this code will redirect him
-        to the initial_url. You can also configure it with WEBLAB_CALLBACK_URL in configuration.
-        """
         self._app = app
         self._base_url = base_url
         self._callback_url = callback_url
@@ -686,8 +691,13 @@ class WebLab(object):
     def initial_url(self, func):
         """
         This must be called. It's a decorator for establishing where the user should be redirected (the lab itself).
+        Example::
 
-        Typically, this is just the url_for('index') or so in the website.
+            @weblab.initial_url
+            def initial_url():
+                return url_for('index')
+
+        :param func: The function that will be called to get the initial URL. It takes no parameter.
         """
         if self._initial_url is not None:
             raise ValueError("initial_url has already been defined")
@@ -697,12 +707,18 @@ class WebLab(object):
 
     def on_start(self, func):
         """
-        Register a method for being called when a new user comes. The format is:
+        Register a method for being called when a new user comes. The format is::
 
-        @weblab.on_start
-        def start(client_data, server_data):
-            return data # simple data, e.g., None, a dict, a list... that will be available as weblab_user.data
+            @weblab.on_start
+            def start(client_data, server_data):
+                initialize_my_resources() # Example code
 
+        :param func: The function that will be used on start.
+
+        This function has two parameters:
+
+        :param client_data: Data provided by the WebLab-Deusto client. It is a dictionary with different parameters.
+        :param server_data: Data provided by the WebLab-Deusto server (username, etc., generally wrapped in the ``weblab_user`` method)
         """
         if self._on_start is not None:
             raise ValueError("on_start has already been defined")
@@ -712,11 +728,11 @@ class WebLab(object):
 
     def on_dispose(self, func):
         """
-        Register a method for being called when a new user comes.
+        Register a method for being called when a new user comes::
 
-        @weblab.on_dispose
-        def dispose():
-            pass
+            @weblab.on_dispose
+            def dispose():
+                pass
         """
         if self._on_dispose is not None:
             raise ValueError("on_dispose has already been defined")
@@ -730,9 +746,11 @@ class WebLab(object):
         However, in some conditions (e.g., restarting WebLab), the dispose method
         might not be called, and the laboratory can end in a wrong state. So as to
         avoid this, weblablib provides three systems:
-        1. A command flask clean_expired_users.
-        2. A thread that by default is running which calls this method every few seconds.
-        3. This API method, available as: weblab.clean_expired_users()
+
+         1. A command flask clean_expired_users.
+         2. A thread that by default is running which calls this method every few seconds.
+         3. This API method, available as: weblab.clean_expired_users()
+
         """
         for session_id in self._redis_manager.find_expired_sessions():
             try:
@@ -744,6 +762,11 @@ class WebLab(object):
 
 
     def run_tasks(self):
+        """
+        Run all the pending tasks, once. It does not have any loop or waits for any new task:
+        it just runs it once. You can use it in your code for running tasks in the pace you
+        consider, or use ``flask weblab loop``.
+        """
         if not self._task_functions:
             # If no task was registered, simply ignore
             return
@@ -792,27 +815,27 @@ class WebLab(object):
     def task(self):
         """
         A task is a function that can be called later on by the WebLab wrapper. It is a set
-        of threads running in the background, so you don't need to deal with it later on.
+        of threads running in the background, so you don't need to deal with it later on::
 
-        @weblab.task()
-        def function(a, b):
-            return a + b
+            @weblab.task()
+            def function(a, b):
+                return a + b
 
-        You can either call it directly (no thread involved):
+        You can either call it directly (no thread involved)::
 
-        result = function(5, 3)
+            result = function(5, 3)
 
-        Or you can call it delayed (and it will be run in a different thread):
+        Or you can call it delayed (and it will be run in a different thread)::
 
-        task_result = function.delay(5, 3)
-        task_result.task_id # The task identifier
-        task_result.status # Either submitted, running, done or failed
-        task_result.result # If done
-        task_result.error # If failed
+            task_result = function.delay(5, 3)
+            task_result.task_id # The task identifier
+            task_result.status # Either submitted, running, done or failed
+            task_result.result # If done
+            task_result.error # If failed
 
-        Later on, you can get tasks by running:
+        Later on, you can get tasks by running::
 
-        task_result = weblab.get_task(task_id)
+            task_result = weblab.get_task(task_id)
 
         """
         #
@@ -863,28 +886,28 @@ class WebLab(object):
 
     def create_token(self, size=None): # pylint: disable=no-self-use
         """
-        Create a URL-safe random unique token in a safe way.
+        Create a URL-safe random token in a safe way. You can use it for secret generation.
         """
         return _create_token(size)
 
     def user_loader(self, func):
         """
-        Create a user loader. It must be a function such as:
+        Create a user loader. It must be a function such as::
 
-        @weblab.user_loader
-        def user_loader(username_unique):
-            return User.query.get(weblab_username=username_unique)
+            @weblab.user_loader
+            def user_loader(username_unique):
+                return User.query.get(weblab_username=username_unique)
 
-        Or similar. Internally, you can also work with weblab_user,
+        Or similar. Internally, you can also work with ``weblab_user``,
         for creating the object if not present or similar.
 
-        With this, you can later do:
+        With this, you can later do::
 
-        user_db = weblab_user.user
+            user_db = weblab_user.user
 
         and internally it will call the user_loader to obtain the
         user associated to this current user.
-        Otherwise, weblab_user.user will return None.
+        Otherwise, ``weblab_user.user`` will return None.
         """
         if self._user_loader is not None:
             raise ValueError("A user_loader has already been registered")
@@ -894,6 +917,9 @@ class WebLab(object):
     def loop(self, threads, reload):
         """
         Launch N threads that run tasks and clean expired users continuously.
+
+        :param threads: Number of threads.
+        :param reload: Reload if the source code is changed. Defaults to ``FLASK_DEBUG``.
         """
         print("Running {} threads".format(threads))
         loop_threads = []
@@ -2019,24 +2045,26 @@ class _TaskWrapper(object):
 
 class WebLabTask(object):
     """
-    WebLab-Task. You can create it by defining a task as in:
+    WebLab-Task. You can create it by defining a task as in::
 
-    @weblab.task()
-    def my_task(arg1, arg2):
-        return arg1 + arg2
+        @weblab.task()
+        def my_task(arg1, arg2):
+            return arg1 + arg2
 
-    And then running it:
+    And then running it::
 
-    task = my_task.delay(5, 10)
-    print(task.task_id)
+        task = my_task.delay(5, 10)
+        print(task.task_id)
 
-    Another option is to obtain it:
+    Another option is to obtain it::
 
-    task = weblab.get_task(task_id)
+        task = weblab.get_task(task_id)
 
-    Or simply:
+    Or simply::
 
-    tasks = weblab.get_tasks()
+        tasks = weblab.get_tasks()
+
+    You are not supposed to create this object.
     """
     def __init__(self, weblab, task_id):
         self._weblab = weblab
@@ -2076,18 +2104,49 @@ class WebLabTask(object):
 
     @property
     def session_id(self):
+        """
+        The current ``session_id`` for WebLab-Deusto
+        """
         task_data = self._task_data
         if task_data:
             return task_data['session_id']
 
     @property
     def name(self):
+        """
+        The name of the function. For example, in::
+
+            @weblab.task()
+            def my_task():
+                pass
+
+        The name would be ``my_task``.
+        """
         task_data = self._task_data
         if task_data:
             return task_data['name']
 
     @property
     def data(self):
+        """
+        Dictionary that you can use to store information from outside and inside the task
+        running. For example, you may call::
+
+            @weblab.task()
+            def my_task():
+                # Something long, but 80%
+                data = current_task.data
+                data['percent'] = 0.8
+                current_task.update_data(data)
+
+            # From outside
+            task = weblab.get_task(task_id)
+            print(task.data.get('percent'))
+
+        Note: every time you call ``data``, it returns a different object. Don't do::
+
+            current_task.data['foo'] = 'bar'
+        """
         task_data = self._task_data
         if task_data:
             return task_data['data']
@@ -2097,9 +2156,20 @@ class WebLabTask(object):
         self._redis_manager.update_task_data(self._task_id, new_data)
 
     def update_data(self, new_data):
+        """Same as::
+
+            task.data = new_data
+
+        :param new_data: new data to be stored in the task data.
+        """
         self._redis_manager.update_task_data(self._task_id, new_data)
 
     def stop(self):
+        """
+        Raise a flag so ``stopping`` becomes ``True``. This method does not guarantee anything.
+        It only provides a flag (``current_task_stopping``) to the task implementor, who might
+        or might not use it.
+        """
         self._redis_manager.request_stop_task(self.task_id)
 
     @property
@@ -2148,6 +2218,9 @@ class WebLabTask(object):
 
     @property
     def stopping(self):
+        """
+        Did anyone call ``stop()``? If so, you should stop running the current task.
+        """
         task_data = self._task_data
         if task_data:
             return task_data['stopping']

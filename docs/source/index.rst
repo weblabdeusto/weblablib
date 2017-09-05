@@ -31,6 +31,7 @@ If you are familiar with Flask and with Web development (while not necessarily),
    license
    configuration
    changelog
+   api
 
 
 Indices and tables
