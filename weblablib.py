@@ -82,7 +82,8 @@ __all__ = ['WebLab',
            'current_task', 'current_task_stopping', 'WebLabTask',
            'WebLabError', 'NoContextError', 'InvalidConfigError',
            'WebLabNotInitializedError', 'TimeoutError',
-           'CurrentUser', 'AnonymousUser', 'ExpiredUser']
+           'AlreadyRunningError', 'CurrentUser', 'AnonymousUser', 
+           'ExpiredUser']
 
 __version__ = '0.4'
 __license__ = 'GNU Affero General Public License v3 http://www.gnu.org/licenses/agpl.html'
@@ -812,7 +813,7 @@ class WebLab(object):
                 delattr(g, '_weblab_task_id')
 
 
-    def task(self):
+    def task(self, ensure_unique=False):
         """
         A task is a function that can be called later on by the WebLab wrapper. It is a set
         of threads running in the background, so you don't need to deal with it later on::
@@ -836,16 +837,21 @@ class WebLab(object):
         Later on, you can get tasks by running::
 
             task_result = weblab.get_task(task_id)
-
+        
+        :params ensure_unique: If you want this task to be not called if another task of
+                               the same type is running at the same time.
         """
         #
         # In the future, weblab.task() will have other parameters, such as
         # discard_result (so the redis record is immediately discarded)
         #
         def task_wrapper(func):
-            wrapper = _TaskWrapper(self, func)
+            wrapper = _TaskWrapper(self, func, ensure_unique)
             if func.__name__ in self._task_functions:
                 raise ValueError("You can't have two tasks with the same name ({})".format(func.__name__))
+
+            if ensure_unique:
+                self._redis_manager.clean_lock_unique_task(func.__name__)
 
             self._task_functions[func.__name__] = wrapper
             return wrapper
@@ -1404,6 +1410,7 @@ def logout():
     if session_id:
         _current_redis().force_exit(session_id)
 
+
 ##################################################################################################################
 #
 #
@@ -1805,6 +1812,20 @@ class _RedisManager(object):
         pipeline.execute()
         return task_id
 
+    def clean_lock_unique_task(self, task_name):
+        self.unlock_unique_task(task_name)
+
+    def lock_unique_task(self, task_name):
+        key = '{}:weblab:unique-tasks:{}'.format(self.key_base, task_name)
+        pipeline = self.client.pipeline()
+        pipeline.hset(key, 'running', 1)
+        pipeline.expire(key, 7200) # 2-hour task lock is way too long in the context of remote labs
+        established, _ = pipeline.execute()
+        return established == 1
+
+    def unlock_unique_task(self, task_name):
+        self.client.delete('{}:weblab:unique-tasks:{}'.format(self.key_base, task_name))
+
     def get_tasks_not_started(self):
         task_ids = [key[len('{}:weblab:task_ids:'.format(self.key_base)):]
                     for key in self.client.keys('{}:weblab:task_ids:*'.format(self.key_base))]
@@ -1986,6 +2007,9 @@ class WebLabNotInitializedError(WebLabError):
 class TimeoutError(WebLabError):
     pass
 
+class AlreadyRunningError(WebLabError):
+    pass
+
 class _NotFoundError(WebLabError, KeyError):
     pass
 
@@ -1996,15 +2020,24 @@ class _NotFoundError(WebLabError, KeyError):
 #
 
 class _TaskWrapper(object):
-    def __init__(self, weblab, func):
+    def __init__(self, weblab, func, ensure_unique):
         self._func = func
+        self._ensure_unique = ensure_unique
         self._name = func.__name__
         self._weblab = weblab
         self._redis_manager = weblab._redis_manager
 
     def __call__(self, *args, **kwargs):
         """Runs the function in the same way, directly, without catching errors"""
-        return self._func(*args, **kwargs)
+        if self._ensure_unique:
+            locked = self._redis_manager.lock_unique_task(self._name)
+            if not locked:
+                raise AlreadyRunningError("This task has been sent in parallel and it is still running")
+
+        try:
+            return self._func(*args, **kwargs)
+        finally:
+            self._redis_manager.unlock_unique_task(self._name)
 
     def delay(self, *args, **kwargs):
         """Starts the function in a thread or in another process.

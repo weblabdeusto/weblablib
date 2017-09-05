@@ -106,6 +106,17 @@ This is essentially equivalent to do:
 
 The reason for doing this is for making sure that certain code runs in the task threads. This can be useful for resources, as explained in :ref:`advanced_proceses_resources`.
 
+Another option of the ``@weblab.task()`` is to define tasks that there should be only one runnnig at the same time:
+
+.. code-block:: python
+
+    @weblab.task(ensure_unique=True)
+    def my_task():
+        # Do something with a resource
+
+If you start two tasks of this type, one of them will be rejected. That is important: it will not be queued, it will be rejected.
+
+
 At any point (including ``on_dispose``), you can see what tasks are still running:
 
 .. code-block:: python

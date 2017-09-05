@@ -817,6 +817,60 @@ class LongTaskTest(BaseSessionWebLabTest):
         self.assertTrue(task.done)
         self.weblab._cleanup()
 
+class EnsureUniqueTaskTest(BaseSessionWebLabTest):
+
+    def get_config(self):
+        config = super(EnsureUniqueTaskTest, self).get_config()
+        config['WEBLAB_AUTOCLEAN_THREAD'] = True
+        config['WEBLAB_TASK_THREADS_PROCESS'] = 3
+        return config
+
+    def lab(self):
+        # We can't know which one will be running first, so we force one to be running first
+        task_object = self.unique_task.delay()
+        while not self.task_is_running:
+            time.sleep(0.05)
+
+        task2 = self.unique_task.delay()
+        task2.join() # Should be fast
+        if not task2.failed:
+            raise Exception("ensure_unique should have avoided the second task")
+        if task2.error['class'] != 'AlreadyRunningError':
+            raise Exception("ensure_unique expected an AlreadyRunningError; got {}".format(task2.error))
+        return str(task_object.task_id)
+
+    def task(self):
+        initial = time.time()
+        self.task_is_running = True
+
+        while not weblablib.current_task_stopping:
+            time.sleep(0.05)
+
+            elapsed = time.time() - initial
+            if elapsed > 6:
+                raise Exception("Error, nobody calling stop")
+
+    def test_ensure_unique(self):
+        self.weblab.cleaner_thread_interval = 0.1
+        self.task_is_running = False
+
+        @self.weblab.task(ensure_unique=True)
+        def task_unique():
+            return self.task()
+
+        self.unique_task = task_unique
+
+        launch_url1, session_id1 = self.new_user()
+
+        with StdWrap():
+            task_id = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+
+        task = self.weblab.get_task(task_id)
+        task.stop()
+        task.join()
+        self.assertTrue(task.done)
+
+
 class DisposeErrorTest(BaseSessionWebLabTest):
 
     def lab(self):
