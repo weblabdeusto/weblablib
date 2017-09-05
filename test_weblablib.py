@@ -448,7 +448,7 @@ class UserTest(BaseSessionWebLabTest):
         # We're outside a task
         self.assertFalse(weblablib.current_task_stopping)
 
-        self.weblab.join_tasks(task, timeout=0.01)
+        self.weblab.join_tasks(task, timeout=0.01, stop=True)
 
         # But the counter is still zero
         self.assertEquals(self.counter, 0)

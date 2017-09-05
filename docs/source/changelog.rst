@@ -23,7 +23,7 @@ Tasks
  * New methods in ``WebLab``:
  
   * ``weblab.get_running_task(function_or_name)`` (which returns the any or ``None``; use with ``ensure_unique=True``) and ``webalb.get_running_tasks(func_or_name)`` to obtain all.
-  * ``weblab.join_tasks(function_or_name, timeout=None, stopping=True)`` which calls ``stop()`` and joins all the tasks with that function (or name of function).
+  * ``weblab.join_tasks(function_or_name, timeout=None, stop=False)`` which calls ``stop()`` if ``stop`` and joins all the tasks with that function (or name of function).
 
 WebSockets
 ^^^^^^^^^^
