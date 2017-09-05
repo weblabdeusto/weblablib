@@ -912,6 +912,23 @@ class WebLab(object):
         if tasks:
             return tasks[0]
 
+    def join_tasks(self, func_or_name, timeout=None, stopping=True):
+        """
+        Stop (optionally) and join all the tasks with a given name.
+
+        :param func_or_name: you can either provide the task function or its name (string)
+        :param timeout: seconds to wait. By default wait forever.
+        :param stopping: call ``stop()`` to each task before call ``join()``. 
+        """
+        tasks = self.get_running_tasks(func_or_name)
+
+        if stopping:
+            for task in tasks:
+                task.stop()
+
+        for task in tasks:
+            task.join(timeout=timeout, error_on_timeout=False)
+
     def create_token(self, size=None): # pylint: disable=no-self-use
         """
         Create a URL-safe random token in a safe way. You can use it for secret generation.
