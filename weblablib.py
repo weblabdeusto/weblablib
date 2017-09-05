@@ -890,6 +890,28 @@ class WebLab(object):
             tasks.append(WebLabTask(self, task_id))
         return tasks
 
+    def get_running_tasks(self, func_or_name):
+        """
+        Get all the running tasks with a given name or function.
+        """
+        name = func_or_name
+        if hasattr(func_or_name, '__code__'):
+            name = func_or_name.__name__
+        
+        tasks = []
+        for task in self.running_tasks:
+            if task.name == name:
+                tasks.append(task)
+        return tasks
+
+    def get_running_task(self, func_or_name):
+        """
+        Get **any** running task with the provided name (or function). This is useful when using ensures_unique=True (so you know there will be only one task using it).
+        """
+        tasks = self.get_running_tasks(func_or_name)
+        if tasks:
+            return tasks[0]
+
     def create_token(self, size=None): # pylint: disable=no-self-use
         """
         Create a URL-safe random token in a safe way. You can use it for secret generation.

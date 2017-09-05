@@ -439,6 +439,11 @@ class UserTest(BaseSessionWebLabTest):
         self.assertIsNone(task1.error)
         task1.stop()
         self.assertTrue(task1.stopping)
+        
+        def task(): pass
+
+        task1b = self.weblab.get_running_task(task)
+        self.assertEquals(task1b, task1)
 
         # We're outside a task
         self.assertFalse(weblablib.current_task_stopping)

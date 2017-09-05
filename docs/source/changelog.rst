@@ -20,6 +20,7 @@ Tasks
  * It also supports ``run_sync()``, with the optional named parameter ``timeout``. This guarantees that you can run tasks in a background process such as ``flask weblab loop``.
  * There is also now a ``stop()`` method and a ``stopping`` flag. If you call ``stop``, ``stopping`` will be ``True``. There is also a property called ``current_task_stopping``.
  * ``@weblab.task()`` now supports ``@weblab.task(ensure_unique=True)``. If multiple threads attempt to raise the same task, only one will run it (and the rest will fail)
+ * New methods ``weblab.get_running_task(function_or_name)`` (which returns the any or ``None``; use with ``ensure_unique=True``) and ``webalb.get_running_tasks(func_or_name)`` to obtain all.
 
 WebSockets
 ^^^^^^^^^^
