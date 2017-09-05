@@ -82,7 +82,7 @@ __all__ = ['WebLab',
            'current_task', 'current_task_stopping', 'WebLabTask',
            'WebLabError', 'NoContextError', 'InvalidConfigError',
            'WebLabNotInitializedError', 'TimeoutError',
-           'AlreadyRunningError', 'CurrentUser', 'AnonymousUser', 
+           'AlreadyRunningError', 'CurrentUser', 'AnonymousUser',
            'ExpiredUser']
 
 __version__ = '0.4'
@@ -202,18 +202,18 @@ class WebLab(object):
 
     :param base_url: the base URL to be used. By default, the WebLab URLs will be
                      ``/weblab/sessions/<something>``.  If you provide ``base_url = '/foo'``, then
-                     it will be listening in ``/foo/weblab/sessions/<something>``. This is the 
+                     it will be listening in ``/foo/weblab/sessions/<something>``. This is the
                      route that will be used in the Flask application (so if your application
-                     is deployed in ``/bar``, then it will be 
-                     ``/bar/foo/weblab/sessions/<something>``. This URLs do NOT need to be 
+                     is deployed in ``/bar``, then it will be
+                     ``/bar/foo/weblab/sessions/<something>``. This URLs do NOT need to be
                      publicly available (they can be only available to WebLab-Deusto if you
-                     want, by playing with the firewall or so). You can also configure it with 
+                     want, by playing with the firewall or so). You can also configure it with
                      ``WEBLAB_BASE_URL`` in the Flask configuration.
 
-    :param callback_url: a URL that WebLab will implement that must be public. For example, 
-                         ``/mylab/callback/``, this URL must be available to the final user. 
-                         The user will be redirected there with a token and this code will 
-                         redirect him to the initial_url. You can also configure it with 
+    :param callback_url: a URL that WebLab will implement that must be public. For example,
+                         ``/mylab/callback/``, this URL must be available to the final user.
+                         The user will be redirected there with a token and this code will
+                         redirect him to the initial_url. You can also configure it with
                          ``WEBLAB_CALLBACK_URL`` in configuration.
     """
 
@@ -569,7 +569,7 @@ class WebLab(object):
                 },
                 'back': back,
             }
-            
+
             result = _weblab_api_request('weblab._start_session', request_data)
 
             if 'url' in result:
@@ -837,7 +837,7 @@ class WebLab(object):
         Later on, you can get tasks by running::
 
             task_result = weblab.get_task(task_id)
-        
+
         :params ensure_unique: If you want this task to be not called if another task of
                                the same type is running at the same time.
         """
@@ -897,7 +897,7 @@ class WebLab(object):
         name = func_or_name
         if hasattr(func_or_name, '__code__'):
             name = func_or_name.__name__
-        
+
         tasks = []
         for task in self.running_tasks:
             if task.name == name:
@@ -918,7 +918,7 @@ class WebLab(object):
 
         :param func_or_name: you can either provide the task function or its name (string)
         :param timeout: seconds to wait. By default wait forever.
-        :param stop: call ``stop()`` to each task before call ``join()``. 
+        :param stop: call ``stop()`` to each task before call ``join()``.
         """
         tasks = self.get_running_tasks(func_or_name)
 
@@ -1070,7 +1070,7 @@ class CurrentUser(WebLabUser):
     data: Serialized data (simple JSON data: dicts, list...) that can be stored for the context of the current user.
     """
 
-    def __init__(self, session_id, back, last_poll, max_date, username, username_unique, 
+    def __init__(self, session_id, back, last_poll, max_date, username, username_unique,
                  exited, data, locale, full_name, experiment_name, category_name, experiment_id):
         self._session_id = session_id
         self._back = back
@@ -1180,8 +1180,8 @@ class CurrentUser(WebLabUser):
         """
         Create a ExpiredUser based on the data of the user
         """
-        return ExpiredUser(session_id=self._session_id, back=self._back, max_date=self._max_date, 
-                           username=self._username, username_unique=self._username_unique, 
+        return ExpiredUser(session_id=self._session_id, back=self._back, max_date=self._max_date,
+                           username=self._username, username_unique=self._username_unique,
                            data=self._data, locale=self._locale, full_name=self._full_name,
                            experiment_name=self._experiment_name, category_name=self._category_name,
                            experiment_id=self._experiment_id)
@@ -1191,14 +1191,14 @@ class CurrentUser(WebLabUser):
         user_loader = _current_weblab()._user_loader
         if user_loader is None:
             return None
-        
+
         try:
             user = user_loader(self.username_unique)
         except:
             raise
         else:
-            # Maybe in the future we should cache results so 
-            # no every weblab_user.user becomes a call to 
+            # Maybe in the future we should cache results so
+            # no every weblab_user.user becomes a call to
             # the database? The main issue is with tasks or
             # long-standing processes
             return user
@@ -1221,7 +1221,7 @@ class ExpiredUser(WebLabUser):
 
     All the fields are same as in User.
     """
-    def __init__(self, session_id, back, max_date, username, username_unique, data, locale, 
+    def __init__(self, session_id, back, max_date, username, username_unique, data, locale,
                  full_name, experiment_name, category_name, experiment_id):
         self._session_id = session_id
         self._back = back
@@ -1358,7 +1358,7 @@ def _set_weblab_user_cache(user):
 weblab_user = LocalProxy(get_weblab_user) # pylint: disable=invalid-name
 
 socket_weblab_user = LocalProxy(lambda : get_weblab_user(cached=False)) # pylint: disable=invalid-name
-   
+
 
 def _current_task():
     task_id = getattr(g, '_weblab_task_id', None)
@@ -1685,12 +1685,12 @@ class _RedisManager(object):
     def get_user(self, session_id):
         pipeline = self.client.pipeline()
         key = '{}:weblab:active:{}'.format(self.key_base, session_id)
-        for name in ('back', 'last_poll', 'max_date', 'username', 'username-unique', 'data', 
+        for name in ('back', 'last_poll', 'max_date', 'username', 'username-unique', 'data',
                         'exited', 'locale', 'full_name', 'experiment_name', 'category_name',
                         'experiment_id'):
             pipeline.hget(key, name)
 
-        (back, last_poll, max_date, username, 
+        (back, last_poll, max_date, username,
         username_unique, data, exited, locale, full_name,
         experiment_name, category_name, experiment_id) = pipeline.execute()
 
@@ -1698,7 +1698,7 @@ class _RedisManager(object):
             return CurrentUser(session_id=session_id, back=back, last_poll=float(last_poll),
                                max_date=float(max_date), username=username,
                                username_unique=username_unique,
-                               data=json.loads(data), exited=json.loads(exited), 
+                               data=json.loads(data), exited=json.loads(exited),
                                locale=json.loads(locale), full_name=json.loads(full_name),
                                experiment_name=json.loads(experiment_name),
                                category_name=json.loads(category_name),
@@ -1709,17 +1709,17 @@ class _RedisManager(object):
     def get_expired_user(self, session_id):
         pipeline = self.client.pipeline()
         key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
-        for name in ('back', 'max_date', 'username', 'username-unique', 'data', 'locale', 
+        for name in ('back', 'max_date', 'username', 'username-unique', 'data', 'locale',
                      'full_name', 'experiment_name', 'category_name', 'experiment_id'):
             pipeline.hget(key, name)
 
-        (back, max_date, username, username_unique, data, locale, 
+        (back, max_date, username, username_unique, data, locale,
          full_name, experiment_name, category_name, experiment_id) = pipeline.execute()
 
         if max_date is not None:
             return ExpiredUser(session_id=session_id, back=back, max_date=float(max_date),
                                username=username, username_unique=username_unique,
-                               data=json.loads(data), 
+                               data=json.loads(data),
                                locale=json.loads(locale),
                                full_name=json.loads(full_name),
                                experiment_name=json.loads(experiment_name),
@@ -2266,7 +2266,7 @@ class WebLabTask(object):
     @property
     def running(self):
         """
-        Is the task still running? Note that this is False if it was submitted and not yet started. 
+        Is the task still running? Note that this is False if it was submitted and not yet started.
         If you want to know in general if it has finished or not, use 'finished'
         """
         return self.status == 'running'
@@ -2473,7 +2473,7 @@ def _dispose_user(session_id, waiting):
                 except Exception:
                     traceback.print_exc()
                 _update_weblab_user_data(None)
-            
+
             unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
             for task_id in unfinished_tasks:
                 unfinished_task = weblab.get_task(task_id)
