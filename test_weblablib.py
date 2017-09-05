@@ -394,6 +394,8 @@ class UserTest(BaseSessionWebLabTest):
 
     def task(self):
         self.counter += 1
+        if not weblablib.current_task_stopping:
+            return "ERROR"
         weblablib.current_task.data = {'inside': 'previous'}
         weblablib.current_task.update_data({'inside': 'yes'})
         return [ self.counter, weblablib.weblab_user.data['foo'] ]
@@ -428,12 +430,15 @@ class UserTest(BaseSessionWebLabTest):
         self.assertEquals(task1.status, 'submitted')
         self.assertTrue(task1.submitted)
         self.assertFalse(task1.finished)
+        self.assertFalse(task1.stopping)
         self.assertFalse(task1.done)
         self.assertFalse(task1.failed)
         self.assertFalse(task1.running)
         self.assertEquals(task1.session_id, session_id1)
         self.assertIsNone(task1.result)
         self.assertIsNone(task1.error)
+        task1.stop()
+        self.assertTrue(task1.stopping)
 
         # But the counter is still zero
         self.assertEquals(self.counter, 0)

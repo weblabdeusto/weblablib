@@ -59,9 +59,14 @@ Or asynchronously (common when it's tasks) and play with the ``WebLabTask`` obje
    task.result # the result of the function
    task.error # the exception data, if an exception happened
 
+   # Join operations
    task.join(timeout=5, error_on_timeout=False) # wait 5 seconds, otherwise do nothing
    task.join(timeout=5, error_on_timeout=True) # wait 5 seconds, otherwise raise error
    task.join() # wait until it finishes
+
+   # Stop flag
+   task.stop() # Raises a flag
+   task.stopping # True or False
 
 If you store the ``task.task_id``, you can retrieve the task in other views or later on:
 
@@ -119,7 +124,7 @@ Also, inside the task, you can get information and change information about the 
 
 .. code-block:: python
    
-   from weblablib import current_task
+   from weblablib import current_task, current_task_stopping
 
    @weblab.task()
    def program_device(path):
@@ -127,6 +132,12 @@ Also, inside the task, you can get information and change information about the 
        current_task.task_id
        print(current_task.data)
        current_task.update_data({ 'a': 'b' })
+
+       if current_task.stopping:
+           # ...
+
+       if current_task_stopping:
+           # ...
 
 And obtain this information from outside:
 

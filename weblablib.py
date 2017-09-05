@@ -79,7 +79,7 @@ __all__ = ['WebLab',
            'weblab_user', 'get_weblab_user', 'socket_weblab_user',
            'requires_login', 'requires_active',
            'socket_requires_login', 'socket_requires_active',
-           'current_task', 'WebLabTask',
+           'current_task', 'current_task_stopping', 'WebLabTask',
            'WebLabError', 'NoContextError', 'InvalidConfigError',
            'WebLabNotInitializedError', 'TimeoutError',
            'CurrentUser', 'AnonymousUser', 'ExpiredUser']
@@ -1299,6 +1299,14 @@ def _current_task():
 
 current_task = LocalProxy(_current_task) # pylint: disable=invalid-name
 
+def _current_task_stopping():
+    task = _current_task()
+    if task:
+        return task.stopping
+    return False
+
+current_task_stopping = LocalProxy(_current_task_stopping)
+
 def requires_login(func):
     """
     Decorator. Requires the user to be logged in (and be a current user or not).
@@ -1765,6 +1773,7 @@ class _RedisManager(object):
         pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'error', 'null')
         pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'result', 'null')
         pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'data', json.dumps({}))
+        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'stopping', json.dumps(False))
         # Missing (normal): running. When created, we know if it's a new key and therefore that
         # no other thread is processing it.
         pipeline.execute()
@@ -1848,6 +1857,16 @@ class _RedisManager(object):
             # Deleted in the meanwhile
             self.client.delete(key)
 
+    def request_stop_task(self, task_id):
+        key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
+        pipeline = self.client.pipeline()
+        pipeline.hget(key, 'name')
+        pipeline.hset(key, 'stopping', json.dumps(True))
+        name, _ = pipeline.execute()
+        if name is None:
+            # Deleted in the meanwhile
+            self.client.delete(key)
+
     def get_task(self, task_id):
         key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
 
@@ -1859,7 +1878,8 @@ class _RedisManager(object):
         pipeline.hget(key, 'running')
         pipeline.hget(key, 'name')
         pipeline.hget(key, 'data')
-        session_id, finished, error_str, result_str, running, name, data_str = pipeline.execute()
+        pipeline.hget(key, 'stopping')
+        session_id, finished, error_str, result_str, running, name, data_str, stopping_str = pipeline.execute()
 
         if session_id is None:
             return None
@@ -1867,6 +1887,7 @@ class _RedisManager(object):
         error = json.loads(error_str)
         result = json.loads(result_str)
         data = json.loads(data_str)
+        stopping = json.loads(stopping_str)
 
         if not running:
             status = 'submitted'
@@ -1886,6 +1907,7 @@ class _RedisManager(object):
             'session_id': session_id,
             'name': name,
             'data': data,
+            'stopping': stopping,
         }
 
     def get_all_tasks(self, session_id):
@@ -2077,6 +2099,9 @@ class WebLabTask(object):
     def update_data(self, new_data):
         self._redis_manager.update_task_data(self._task_id, new_data)
 
+    def stop(self):
+        self._redis_manager.request_stop_task(self.task_id)
+
     @property
     def status(self):
         """
@@ -2120,6 +2145,12 @@ class WebLabTask(object):
         Has the task finished? (either right or failing)
         """
         return self.status in ('done', 'failed')
+
+    @property
+    def stopping(self):
+        task_data = self._task_data
+        if task_data:
+            return task_data['stopping']
 
     @property
     def result(self):

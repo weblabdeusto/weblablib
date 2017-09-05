@@ -18,6 +18,7 @@ Tasks
 
  * A ``WebLabTask`` supports ``.join()`` method. It defaults to ``.join(timeout=None, error_on_timeout=True)``,  raising an error, but can be configured with those parameters.
  * It also supports ``run_sync()``, with the optional named parameter ``timeout``. This guarantees that you can run tasks in a background process such as ``flask weblab loop``.
+ * There is also now a ``stop()`` method and a ``stopping`` flag. If you call ``stop``, ``stopping`` will be ``True``. There is also a property called ``current_task_stopping``.
 
 WebSockets
 ^^^^^^^^^^
