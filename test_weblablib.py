@@ -791,7 +791,7 @@ class LongTaskTest(BaseSessionWebLabTest):
         self.client.get('/logout')
         time.sleep(0.2) # So other thread calls clean
         self.dispose()
-        self.weblab._cleanup()
+        weblablib._on_exit()
 
     def test_run_sync_short(self):
         self.sleep_time = 0.1
@@ -885,9 +885,16 @@ class CLITest(BaseCLITest):
 
     def test_cli_flow(self):
         runner = CliRunner()
+        
+        class webbrowser(object):
+            @staticmethod
+            def open(*args, **kwargs):
+                pass
+
+        weblablib.webbrowser = webbrowser
 
         with runner.isolated_filesystem():
-            result = runner.invoke(self.app.cli, ["weblab", "fake", "new", "--dont-open-browser"])
+            result = runner.invoke(self.app.cli, ["weblab", "fake", "new"])
             self.assertEquals(result.exit_code, 0)
 
             result = runner.invoke(self.app.cli, ["weblab", "fake", "status"])
