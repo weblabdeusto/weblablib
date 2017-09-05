@@ -140,7 +140,7 @@ def hardware_status():
 
     return dict(lights=lights_data, microcontroller=microcontroller, time_left=weblab_user.time_left)
 
-@weblab.task()
+@weblab.task(ensure_unique=True)
 def program_device(code):
 
     if weblab_user.time_left < 10:

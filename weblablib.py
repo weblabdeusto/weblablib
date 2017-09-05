@@ -2076,7 +2076,8 @@ class _TaskWrapper(object):
         try:
             return self._func(*args, **kwargs)
         finally:
-            self._redis_manager.unlock_unique_task(self._name)
+            if self._ensure_unique:
+                self._redis_manager.unlock_unique_task(self._name)
 
     def delay(self, *args, **kwargs):
         """Starts the function in a thread or in another process.
