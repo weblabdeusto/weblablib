@@ -440,6 +440,9 @@ class UserTest(BaseSessionWebLabTest):
         task1.stop()
         self.assertTrue(task1.stopping)
 
+        # We're outside a task
+        self.assertFalse(weblablib.current_task_stopping)
+
         # But the counter is still zero
         self.assertEquals(self.counter, 0)
     
@@ -615,6 +618,7 @@ class TaskFailTest(BaseSessionWebLabTest):
         self.assertTrue(task.submitted)
         self.assertFalse(task.failed)
         self.assertFalse(task.finished)
+        self.assertFalse(task.stopping)
         self.assertFalse(task.running)
         self.assertFalse(task.done)
         
