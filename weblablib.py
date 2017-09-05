@@ -2401,8 +2401,13 @@ def _dispose_user(session_id, waiting):
                 except Exception:
                     traceback.print_exc()
                 _update_weblab_user_data(None)
-
+            
             unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
+            for task_id in unfinished_tasks:
+                unfinished_task = weblab.get_task(task_id)
+                if unfinished_task:
+                    unfinished_task.stop()
+
             while unfinished_tasks:
                 unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
                 time.sleep(0.1)
