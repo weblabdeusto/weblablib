@@ -1,0 +1,4 @@
+redis>=2.10<3
+flask>=0.12
+six
+requests
