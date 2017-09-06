@@ -2071,7 +2071,7 @@ class _TaskWrapper(object):
         if self._ensure_unique:
             locked = self._redis_manager.lock_unique_task(self._name)
             if not locked:
-                raise AlreadyRunningError("This task has been sent in parallel and it is still running")
+                raise AlreadyRunningError("This task ({}) has been sent in parallel and it is still running".format(self._name))
 
         try:
             return self._func(*args, **kwargs)
