@@ -63,7 +63,7 @@ import click
 from werkzeug import LocalProxy, ImmutableDict
 from flask import Blueprint, Response, jsonify, request, current_app, redirect, \
      url_for, g, session, after_this_request, render_template, Markup, \
-     has_request_context
+     has_request_context, has_app_context
 
 try:
     from flask_socketio import disconnect as socketio_disconnect
@@ -940,10 +940,11 @@ class WebLab(object):
                 if task_data['session_id'] == _current_session_id():
                     return WebLabTask(self, task_data['task_id'])
 
-        # if no task_data or func is True:
-        tasks = self.get_tasks(name)
-        if tasks:
-            return tasks[0]
+        if has_app_context():
+            # if no task_data or func is True:
+            tasks = self.get_tasks(name)
+            if tasks:
+                return tasks[0]
 
     @property
     def tasks(self):
