@@ -23,7 +23,7 @@ classifiers=[
 cp_license="GNU AGPL v3"
 
 setup(name='weblablib',
-      version='0.4',
+      version='0.5',
       description="WebLab-Deusto library for creating unmanaged laboratories",
       classifiers=classifiers,
       zip_safe=False,
