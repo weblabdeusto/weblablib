@@ -32,6 +32,7 @@ If you are familiar with Flask and with Web development (while not necessarily),
    configuration
    changelog
    api
+   cli
 
 
 Indices and tables
