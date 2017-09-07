@@ -30,6 +30,9 @@ In the case of Python, with the popular `Flask <http://flask.pocoo.org>`_ microf
 
 If you are familiar with Flask and with Web development (while not necessarily), and want to be able to customize everything but not need to implement all the layers of authentication, administration, etc., this library would be very useful.
 
+User's guide
+------------
+
 .. toctree::
    :maxdepth: 2
 
@@ -37,11 +40,24 @@ If you are familiar with Flask and with Web development (while not necessarily),
    advanced
    examples
    license
+
+Reference
+---------
+
+.. toctree::
+   :maxdepth: 2
+
    configuration
-   changelog
    api
    cli
 
+Additional notes
+----------------
+
+.. toctree::
+   :maxdepth: 2
+
+   changelog
 
 Indices and tables
 ==================
