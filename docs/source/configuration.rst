@@ -1,7 +1,7 @@
 .. _configuration:
 
-Configuration
-=============
+Configuration values
+====================
 
 The following are the configuration variables of **weblablib**:
 

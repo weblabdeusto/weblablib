@@ -48,8 +48,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'weblablib'
-copyright = u'2017, LabsLand team'
-author = u'LabsLand team'
+copyright = u'2017, LabsLand'
+author = u'LabsLand'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -133,7 +133,7 @@ html_theme_options = {
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
-#html_logo = None
+html_logo = '_static/logo.png'
 
 # The name of an image file (relative to this directory) to use as a favicon of
 # the docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32

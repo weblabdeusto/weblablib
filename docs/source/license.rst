@@ -3,7 +3,7 @@
 License
 =======
 
-**weblablib** is released under the `GNU Affero General Public License (AGPL) v3 <https://www.gnu.org/licenses/agpl-3.0.en.html>`_. 
+**weblablib** is released under the `GNU Affero General Public License (AGPL) v3 <https://www.gnu.org/licenses/agpl-3.0.en.html>`_, and has been developed by `LabsLand <https://labsland.com>`_.
 
 This means that:
 
