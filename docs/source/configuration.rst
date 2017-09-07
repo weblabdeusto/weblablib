@@ -5,6 +5,9 @@ Configuration values
 
 The following are the configuration variables of **weblablib**:
 
+WebLab-Deusto
+-------------
+
 .. tabularcolumns:: |p{6.5cm}|p{8.5cm}|
 
 ================================= =========================================
@@ -14,6 +17,21 @@ The following are the configuration variables of **weblablib**:
                                   system calling). **Mandatory**
 ``WEBLAB_PASSWORD``               WebLab-Deusto credentials. Read also
                                   ``WEBLAB_USERNAME``. **Mandatory**
+``WEBLAB_POLL_INTERVAL``          WebLab-Deusto is connecting every few seconds
+                                  to the laboratory asking if the user is still
+                                  alive or if he left. By default, 5 seconds.
+                                  You can regulate it with this configuration
+                                  variable. Note that if you establish ``0``,
+                                  then WebLab-Deusto will not ask again and
+                                  will wait until the end of the cycle.
+================================= =========================================
+
+URLs
+----
+
+.. tabularcolumns:: |p{6.5cm}|p{8.5cm}|
+
+================================= =========================================
 ``WEBLAB_CALLBACK_URL``           **weblablib** creates a set or URLs for
                                   receiving methods directly by the user.
                                   This methods must be publicly available by
@@ -21,6 +39,16 @@ The following are the configuration variables of **weblablib**:
 ``WEBLAB_BASE_URL``               If you want to start /weblab/sessions
                                   somewhere else (e.g., ``/mylab``), you can
                                   configure it here.
+``WEBLAB_SCHEME``                 If set to ``https``, forces using ``https`` in
+                                  the link sent to the user.
+================================= =========================================
+
+Redis
+-----
+
+.. tabularcolumns:: |p{6.5cm}|p{8.5cm}|
+
+================================= =========================================
 ``WEBLAB_REDIS_URL``              Url used for connecting to Redis. By
                                   default it's the database 0 with localhost
                                   and standard port, but you can configure it:
@@ -31,6 +59,14 @@ The following are the configuration variables of **weblablib**:
                                   in Redis. If one is ``lab1`` and the other
                                   is ``lab2``, in Redis values will start by
                                   ``lab1:`` or ``lab2:``.
+================================= =========================================
+
+Session management
+------------------
+
+.. tabularcolumns:: |p{6.5cm}|p{8.5cm}|
+
+================================= =========================================
 ``WEBLAB_SESSION_ID_NAME``        The name that the **weblablib** session will
                                   have in the Flask **session** object.
 ``WEBLAB_TIMEOUT``                Value in seconds taken by **weblablib** to
@@ -39,6 +75,9 @@ The following are the configuration variables of **weblablib**:
 ``WEBLAB_AUTOPOLL``               If ``True`` (default value), it will make
                                   that every call to the server will call
                                   ``poll``.
+``WEBLAB_EXPIRED_USERS_TIMEOUT``  Once the user is expired, the information is
+                                  kept in Redis for some time. By default, this
+                                  is ``3600`` (seconds, which is one hour).
 ``WEBLAB_UNAUTHORIZED_LINK``      When a user is not logged in (or the session
                                   expired -after an hour-, by default finds an
                                   ``Access forbidden`` message. You can put
@@ -49,11 +88,14 @@ The following are the configuration variables of **weblablib**:
                                   instead of redirecting, it renders a template.
                                   If you put ``forbidden.html``, it will render
                                   whatever is in ``templates/forbidden.html``.
-``WEBLAB_SCHEME``                 If set to ``https``, forces using ``https`` in
-                                  the link sent to the user.
-``WEBLAB_EXPIRED_USERS_TIMEOUT``  Once the user is expired, the information is
-                                  kept in Redis for some time. By default, this
-                                  is ``3600`` (seconds, which is one hour).
+================================= =========================================
+
+Processes and threading
+-----------------------
+
+.. tabularcolumns:: |p{6.5cm}|p{8.5cm}|
+
+================================= =========================================
 ``WEBLAB_AUTOCLEAN_THREAD``       By default ``True``, it states whether there
                                   will be a thread by process cleaning sessions
                                   of expired users or not.
