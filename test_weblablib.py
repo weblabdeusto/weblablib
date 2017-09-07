@@ -122,7 +122,18 @@ class BaseWebLabTest(unittest.TestCase):
                 self.task()
 
         self.assertIn("same name", str(cm.exception))
+
+        with self.assertRaises(ValueError) as cm:
+            # 43 characters is the length of create_token()
+            self.assertEquals(43, len(weblablib._create_token()))
+
+            # Therefore, having a task with that name length is forbidden
+            # to avoid any potential issue in get_task
+            @self.weblab.task()
+            def abc0123456789012345678901234567890123456789():
+                pass
            
+        self.assertIn("number of characters", str(cm.exception))
 
         self.current_task = task
 
@@ -442,8 +453,33 @@ class UserTest(BaseSessionWebLabTest):
         
         def task(): pass
 
-        task1b = self.weblab.get_running_task(task)
+        task1b = self.weblab.get_task(task)
+        task1c = self.weblab.get_task('task')
+        task1d = self.weblab.get_running_task(task)
+        task1e = self.weblab.get_running_task('task')
+
         self.assertEquals(task1b, task1)
+        self.assertEquals(task1c, task1)
+        self.assertEquals(task1d, task1)
+        self.assertEquals(task1e, task1)
+
+        tasks_b = self.weblab.get_tasks(task)
+        tasks_c = self.weblab.get_tasks('task')
+        tasks_d = self.weblab.get_running_tasks(task)
+        tasks_e = self.weblab.get_running_tasks('task')
+
+        self.assertEquals(1, len(tasks_b))
+        self.assertEquals(1, len(tasks_c))
+        self.assertEquals(1, len(tasks_d))
+        self.assertEquals(1, len(tasks_e))
+
+        self.assertEquals(0, len(self.weblab.get_tasks('foo')))
+        self.assertEquals(0, len(self.weblab.get_running_tasks('foo')))
+
+        self.assertEquals(tasks_b[0], task1)
+        self.assertEquals(tasks_c[0], task1)
+        self.assertEquals(tasks_d[0], task1)
+        self.assertEquals(tasks_e[0], task1)
 
         # We're outside a task
         self.assertFalse(weblablib.current_task_stopping)
@@ -505,6 +541,15 @@ class UserTest(BaseSessionWebLabTest):
         self.assertEquals(cmp(task1, task2), 0)
         self.assertFalse(task1 < task2)
         self.assertFalse(task2 < task1)
+
+        task2b = self.weblab.get_task(task)
+        task2c = self.weblab.get_task('task')
+        task2d = self.weblab.get_running_task(task)
+        task2e = self.weblab.get_running_task('task')
+        self.assertEquals(task2b, task2)
+        self.assertEquals(task2c, task2)
+        self.assertIsNone(task2d)
+        self.assertIsNone(task2e)
 
         # sys.maxint/maxsize is the maximum integer. Any hash will be lower than that
         # (except for if suddenly the random string is exactly maxint...)

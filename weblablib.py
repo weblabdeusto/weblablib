@@ -2324,7 +2324,9 @@ class _TaskWrapper(object):
         self._ensure_unique = ensure_unique
         self._name = func.__name__
         if len(self._name) == len(_create_token()):
-            raise ValueError("The function '{}' has an invalid name: the number of characters must be higher or  lower than this. Otherwise get_task(task_id) could potentially fail".format(func.__name__))
+            raise ValueError("The function '{}' has an invalid name: the number of characters "
+                             "must be higher or  lower than this. Otherwise get_task(task_id) "
+                             "could potentially fail".format(func.__name__))
 
         self._weblab = weblab
         self._redis_manager = weblab._redis_manager
