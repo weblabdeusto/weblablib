@@ -49,7 +49,6 @@ import base64
 import pickle
 import signal
 import datetime
-import requests
 import threading
 import traceback
 import webbrowser
@@ -59,6 +58,7 @@ from functools import wraps
 import six
 import redis
 import click
+import requests
 
 from werkzeug import LocalProxy, ImmutableDict
 from flask import Blueprint, Response, jsonify, request, current_app, redirect, \
@@ -284,7 +284,7 @@ class WebLab(object):
             if app != self._app:
                 raise ValueError("Error: app already initialized with a different app!")
 
-            if pickle.dumps(app.config) != self._app_config:
+            if pickle.dumps(app.config) != self._app_config: # pylint: disable=access-member-before-definition
                 raise ValueError("Error: app previously called with different config!")
 
             # Already initialized with the same app
@@ -507,7 +507,7 @@ class WebLab(object):
         @weblab_cli.command('loop')
         @click.option('--threads', default=5, help="Number of threads")
         @click.option('--reload/--no-reload', default=None, help="Reload as code changes. Defaults to whether the app is in FLASK_DEBUG mode")
-        def loop(threads, reload):
+        def loop(threads, reload): # pylint: disable=redefined-builtin
             """
             Run planned tasks and clean expired users, permanently.
             """
@@ -535,14 +535,14 @@ class WebLab(object):
             """
             pass
 
-        def _weblab_api_request(url_name, json, session_id=None):
+        def _weblab_api_request(url_name, json_data, session_id=None):
             if session_id:
                 url = url_for(url_name, session_id=session_id, _external=True)
             else:
                 url = url_for(url_name, _external=True)
             weblab_username = current_app.config.get('WEBLAB_USERNAME')
             weblab_password = current_app.config.get('WEBLAB_PASSWORD')
-            response = requests.post(url, json=json, auth=(weblab_username, weblab_password))
+            response = requests.post(url, json=json_data, auth=(weblab_username, weblab_password))
             return response.json()
 
         @fake.command('new')
@@ -635,7 +635,7 @@ class WebLab(object):
             request_data = {
                 'action': 'delete',
             }
-            result = _weblab_api_request('weblab._dispose_experiment', session_id=session_id, json=request_data)
+            result = _weblab_api_request('weblab._dispose_experiment', session_id=session_id, json_data=request_data)
 
             if os.path.exists('.fake_weblab_user_session_id'):
                 os.remove('.fake_weblab_user_session_id')
@@ -1072,7 +1072,7 @@ class WebLab(object):
 
         self._user_loader = func
 
-    def loop(self, threads, reload):
+    def loop(self, threads, reload): # pylint: disable=redefined-builtin
         """
         Launch ``threads`` threads that run tasks and clean expired users continuously.
 
@@ -1082,7 +1082,7 @@ class WebLab(object):
         print("Running {} threads".format(threads))
         loop_threads = []
 
-        def stop_threads(*args):
+        def stop_threads(*args): # pylint: disable=unused-argument
             if not self._stopping:
                 print("Waiting...")
             self._stopping = True
@@ -1104,12 +1104,10 @@ class WebLab(object):
             loop_threads.append(cleaner_thread)
             cleaner_thread.start()
 
-        global _TESTING_LOOP
-
         while True:
             try:
                 time.sleep(0.2)
-            except:
+            except Exception:
                 break
 
             if self._stopping or _TESTING_LOOP:
@@ -1288,7 +1286,7 @@ class CurrentUser(WebLabUser):
         redis_manager.update_data(self._session_id, data)
         self._data = data
 
-    def update_data(self, new_data = _OBJECT):
+    def update_data(self, new_data=_OBJECT):
         """
         Updates data::
 
@@ -1595,7 +1593,7 @@ def _set_weblab_user_cache(user):
 
 weblab_user = LocalProxy(get_weblab_user) # pylint: disable=invalid-name
 
-socket_weblab_user = LocalProxy(lambda : get_weblab_user(cached=False)) # pylint: disable=invalid-name
+socket_weblab_user = LocalProxy(lambda: get_weblab_user(cached=False)) # pylint: disable=invalid-name
 
 
 def _current_task():
@@ -1614,7 +1612,7 @@ def _current_task_stopping():
         return task.stopping
     return False
 
-current_task_stopping = LocalProxy(_current_task_stopping)
+current_task_stopping = LocalProxy(_current_task_stopping) # pylint: disable=invalid-name
 
 def requires_login(func):
     """
@@ -1830,14 +1828,14 @@ def _process_start_request(request_data):
         weblab._set_session_id(session_id)
         try:
             data = weblab._on_start(client_initial_data, server_initial_data)
-        except Exception as e:
+        except Exception as error:
             traceback.print_exc()
-            current_app.logger.warning("Error calling _on_start: {}".format(e), exc_info=True)
+            current_app.logger.warning("Error calling _on_start: {}".format(error), exc_info=True)
             try:
                 _dispose_user(session_id, waiting=True)
-            except Exception as e2:
+            except Exception as nested_error:
                 traceback.print_exc()
-                current_app.logger.warning("Error calling _on_dispose after _on_start failed: {}".format(e2), exc_info=True)
+                current_app.logger.warning("Error calling _on_dispose after _on_start failed: {}".format(nested_error), exc_info=True)
 
             return dict(error=True, message="Error initializing laboratory")
         else:
@@ -1942,13 +1940,13 @@ class _RedisManager(object):
         pipeline = self.client.pipeline()
         key = '{}:weblab:active:{}'.format(self.key_base, session_id)
         for name in ('back', 'last_poll', 'max_date', 'username', 'username-unique', 'data',
-                        'exited', 'locale', 'full_name', 'experiment_name', 'category_name',
-                        'experiment_id'):
+                     'exited', 'locale', 'full_name', 'experiment_name', 'category_name',
+                     'experiment_id'):
             pipeline.hget(key, name)
 
         (back, last_poll, max_date, username,
-        username_unique, data, exited, locale, full_name,
-        experiment_name, category_name, experiment_id) = pipeline.execute()
+         username_unique, data, exited, locale, full_name,
+         experiment_name, category_name, experiment_id) = pipeline.execute()
 
         if max_date is not None:
             return CurrentUser(session_id=session_id, back=back, last_poll=float(last_poll),
@@ -2643,7 +2641,7 @@ class WebLabTask(object):
 
     def __cmp__(self, other):
         """Compare it with other object"""
-        cmp = lambda a, b: (a > b) - (a < b)
+        cmp = lambda a, b: (a > b) - (a < b) # pylint: disable=redefined-builtin
 
         if isinstance(other, WebLabTask):
             return cmp(self._task_id, other._task_id)
@@ -2837,10 +2835,11 @@ class _CleanerThread(threading.Thread):
             except Exception:
                 traceback.print_exc()
 
-            t0 = time.time()
+            initial_time = time.time()
             while True:
                 time.sleep(0.05)
-                if time.time() -  t0 > self.weblab.cleaner_thread_interval:
+                elapsed = time.time() - initial_time
+                if time.time() - initial_time > self.weblab.cleaner_thread_interval:
                     break
 
                 if self._stopping:
