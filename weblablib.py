@@ -157,6 +157,12 @@ class ConfigurationKeys(object):
     # in a 'templates' directory (see Flask documentation for details)
     WEBLAB_UNAUTHORIZED_TEMPLATE = 'WEBLAB_UNAUTHORIZED_TEMPLATE'
 
+    # WebLab-Deusto is connecting every few seconds to the laboratory asking if the user
+    # is still alive or if he left. By default, 5 seconds. You can regulate it with this
+    # configuration variable. Note that if you establish '0', then WebLab-Deusto will 
+    # not ask again and will wait until the end of the cycle.
+    WEBLAB_POLL_INTERVAL = 'WEBLAB_POLL_INTERVAL'
+
     # Force 'http' or 'https'
     WEBLAB_SCHEME = 'WEBLAB_SCHEME'
 
@@ -223,6 +229,7 @@ class WebLab(object):
         self._callback_url = callback_url
         self._redis_client = None
 
+        self.poll_interval = 5
         self.cleaner_thread_interval = 5
         self.timeout = 15 # Will be overrided by the init_app method
         self.join_step_time = 0.05 # Default value, when calling task.join() how long it should wait.
@@ -265,7 +272,10 @@ class WebLab(object):
 
     def init_app(self, app):
         """
-        Initialize the app. This method MUST be called (unless 'app' is provided in the constructor of WebLab)
+        Initialize the app. This method MUST be called (unless 'app' is provided in the 
+        constructor of WebLab; then it's called in that moment internally). Most configuration 
+        variables are taken here (so changing ``app.config`` afterwards will not affect 
+        ``WebLab``).
         """
         if app is None:
             raise ValueError("app must be a Flask app")
@@ -304,6 +314,7 @@ class WebLab(object):
         #
         self._session_id_name = self._app.config.get(ConfigurationKeys.WEBLAB_SESSION_ID_NAME, 'weblab_session_id')
         self.timeout = self._app.config.get(ConfigurationKeys.WEBLAB_TIMEOUT, 15)
+        self.poll_interval = self._app.config.get(ConfigurationKeys.WEBLAB_POLL_INTERVAL, 5)
         autopoll = self._app.config.get(ConfigurationKeys.WEBLAB_AUTOPOLL, True)
         self._redirection_on_forbiden = self._app.config.get(ConfigurationKeys.WEBLAB_UNAUTHORIZED_LINK)
         self._template_on_forbiden = self._app.config.get(ConfigurationKeys.WEBLAB_UNAUTHORIZED_TEMPLATE)
@@ -691,7 +702,8 @@ class WebLab(object):
 
     def initial_url(self, func):
         """
-        This must be called. It's a decorator for establishing where the user should be redirected (the lab itself).
+        This must be called, and only once. It's a decorator for establishing 
+        where the user should be redirected (the lab itself).
         Example::
 
             @weblab.initial_url
@@ -750,7 +762,7 @@ class WebLab(object):
 
          1. A command flask clean_expired_users.
          2. A thread that by default is running which calls this method every few seconds.
-         3. This API method, available as: weblab.clean_expired_users()
+         3. This API method, available as ``weblab.clean_expired_users()``
 
         """
         for session_id in self._redis_manager.find_expired_sessions():
@@ -834,9 +846,53 @@ class WebLab(object):
             task_result.result # If done
             task_result.error # If failed
 
-        Later on, you can get tasks by running::
+        Or you can call it synchronously (but run in other thread / process):
+
+            task_result = function.run_sync(5, 3)
+            task_result.task_id 
+            # ...
+
+        You can use this :class:`WebLabTask` object, or later, you can get the task
+        in other view using :meth:`WebLab.get_task`::
 
             task_result = weblab.get_task(task_id)
+
+        By using :meth:`WebLab.tasks` or :meth:`WebLab.running_tasks` (if still running)::
+
+            for task in weblab.running_tasks:
+                if task.name == 'function':
+                   # ...
+
+            for task in weblab.tasks:
+                if task.name == 'function':
+                   # ...
+
+        Or even by name directly with :meth:`WebLab.get_running_task` or :meth:`WebLab.get_running_tasks` or similar::
+
+            # Only the running ones
+            weblab.get_running_tasks(function) # By the function
+            weblab.get_running_tasks('function') # By the name
+            
+            # All (running and stopped)
+            weblab.get_tasks(function)
+            weblab.get_tasks('function')
+
+            # Only one (the first result). Useful when you run one task only once.
+            weblab.get_running_task(function)
+            weblab.get_running_task('function')
+
+            # Yes, it's the same as get_task(task_id). It supports both
+            weblab.get_task(function)
+            weblab.get_task('function')
+
+        Finally, you can join a task with :meth:`WebLabTask.join` or :meth:`WebLab.join_tasks`:
+
+            task.join()
+            task.join(timeout=5) # Wait 5 seconds, raise an error
+            task.join(stop=True) # Call .stop() first
+
+            weblab.join_tasks(function)
+            weblab.join_tasks('function', stop=True)
 
         :params ensure_unique: If you want this task to be not called if another task of
                                the same type is running at the same time.
@@ -858,20 +914,43 @@ class WebLab(object):
 
         return task_wrapper
 
-    def get_task(self, task_id):
+    def get_task(self, identifier):
         """
-        Given a task of the current user, return the WebLabTask object
+        Given a task of the current user, return the :class:`WebLabTask` object.
+
+        The identifier can be:
+          1. A ``task_id``
+          2. A function name
+          3. A function
+
+        See also :meth:`WebLab.task` for examples.
+
+        :param identifier: either a ``task_id``, a function name or a function.
         """
-        task_data = self._redis_manager.get_task(task_id)
-        if task_data:
-            # Don't return tasks of other users
-            if task_data['session_id'] == _current_session_id():
-                return WebLabTask(self, task_data['task_id'])
+        name = identifier
+        func = False
+        if hasattr(identifier, '__code__'):
+            name = identifier.__name__
+            func = True
+
+        if not func:
+            task_data = self._redis_manager.get_task(name)
+            if task_data:
+                # Don't return tasks of other users
+                if task_data['session_id'] == _current_session_id():
+                    return WebLabTask(self, task_data['task_id'])
+        
+        # if no task_data or func is True:
+        tasks = self.get_tasks(name)
+        if tasks:
+            return tasks[0]
 
     @property
     def tasks(self):
         """
         Return all the tasks created in the current session (completed or not)
+
+        See also :meth:`WebLab.task` for examples.
         """
         session_id = _current_session_id()
         tasks = []
@@ -883,6 +962,8 @@ class WebLab(object):
     def running_tasks(self):
         """
         Check which tasks are still running and return them.
+
+        See also :meth:`WebLab.task` for examples.
         """
         session_id = _current_session_id()
         tasks = []
@@ -893,6 +974,8 @@ class WebLab(object):
     def get_running_tasks(self, func_or_name):
         """
         Get all the running tasks with a given name or function.
+
+        See also :meth:`WebLab.task` for examples.
         """
         name = func_or_name
         if hasattr(func_or_name, '__code__'):
@@ -907,10 +990,32 @@ class WebLab(object):
     def get_running_task(self, func_or_name):
         """
         Get **any** running task with the provided name (or function). This is useful when using ensures_unique=True (so you know there will be only one task using it).
+
+        See also :meth:`WebLab.task` for examples.
+
+        :param func_or_name: a function or a function name of a task
         """
         tasks = self.get_running_tasks(func_or_name)
         if tasks:
             return tasks[0]
+
+    def get_tasks(self, func_or_name):
+        """
+        Get all the tasks (running or stopped) with the provided name (or function). This is useful when using ensures_unique=True (so you know there will be only one task using it).
+
+        See also :meth:`WebLab.task` for examples.
+
+        :param func_or_name: a function or a function name of a task
+        """
+        name = func_or_name
+        if hasattr(func_or_name, '__code__'):
+            name = func_or_name.__name__
+        
+        tasks = []
+        for task in self.tasks:
+            if task.name == name:
+                tasks.append(task)
+        return tasks
 
     def join_tasks(self, func_or_name, timeout=None, stop=False):
         """
@@ -932,6 +1037,11 @@ class WebLab(object):
     def create_token(self, size=None): # pylint: disable=no-self-use
         """
         Create a URL-safe random token in a safe way. You can use it for secret generation.
+
+        :param size: the size of random bytes. The token will be later converted to base64, so
+                     the length of the returned string will be different (e.g., size=32 returns 
+                     length=43).
+        :return: a unique token.
         """
         return _create_token(size)
 
@@ -943,7 +1053,7 @@ class WebLab(object):
             def user_loader(username_unique):
                 return User.query.get(weblab_username=username_unique)
 
-        Or similar. Internally, you can also work with ``weblab_user``,
+        Or similar. Internally, you can also work with :data:`weblab_user`,
         for creating the object if not present or similar.
 
         With this, you can later do::
@@ -952,7 +1062,9 @@ class WebLab(object):
 
         and internally it will call the user_loader to obtain the
         user associated to this current user.
-        Otherwise, ``weblab_user.user`` will return None.
+        Otherwise, ``weblab_user.user`` will return ``None``.
+
+        :param func: The function that will be called.
         """
         if self._user_loader is not None:
             raise ValueError("A user_loader has already been registered")
@@ -961,7 +1073,7 @@ class WebLab(object):
 
     def loop(self, threads, reload):
         """
-        Launch N threads that run tasks and clean expired users continuously.
+        Launch ``threads`` threads that run tasks and clean expired users continuously.
 
         :param threads: Number of threads.
         :param reload: Reload if the source code is changed. Defaults to ``FLASK_DEBUG``.
@@ -1017,7 +1129,12 @@ _TESTING_LOOP = False
 
 class WebLabUser(object):
     """
-    Abstract representation of a WebLabUser
+    Abstract representation of a WebLabUser. Implementations:
+
+     * :class:`AnonymousUser`
+     * :class:`CurrentUser`
+     * :class:`ExpiredUser`
+
     """
     __metaclass__ = abc.ABCMeta
 
@@ -1035,20 +1152,28 @@ class WebLabUser(object):
 
 @six.python_2_unicode_compatible
 class AnonymousUser(WebLabUser):
+    """
+    Implementation of :class:`WebLabUser` representing anonymous users.
+    """
+
     @property
     def active(self):
+        """Is active? Always ``False``"""
         return False
 
     @property
     def is_anonymous(self):
+        """Is anonymous? Always ``True``"""
         return True
 
     @property
     def locale(self):
+        """Language requested by WebLab-Deusto? Always ``None``"""
         return None
 
     @property
     def data(self):
+        """Data? An immutable empty dictionary"""
         return ImmutableDict()
 
     def __str__(self):
@@ -1059,15 +1184,8 @@ _OBJECT = object()
 @six.python_2_unicode_compatible
 class CurrentUser(WebLabUser):
     """
-    This class represents a user which is still actively using a laboratory. If the session expires, it will become a ExpiredUser.
-
-    back: URL to redirect the user when finished
-    last_poll: the last time the user polled. Updated every time poll() is called.
-    max_date: datetime, the maximum date the user is supposed to be alive. When a new reservation comes, it states the time assigned.
-    username: the simple username for the user in the final system (e.g., 'tom'). It may be repeated across different systems.
-    username_unique: a unique username for the user. It is globally unique (e.g., tom@school1@labsland).
-    exited: the user left the laboratory (e.g., he closed the window or a timeout happened).
-    data: Serialized data (simple JSON data: dicts, list...) that can be stored for the context of the current user.
+    This class is a :class:`WebLabUser` representing a user which is still actively using a 
+    laboratory. If the session expires, it will become a :class:`ExpiredUser`.
     """
 
     def __init__(self, session_id, back, last_poll, max_date, username, username_unique,
@@ -1088,54 +1206,79 @@ class CurrentUser(WebLabUser):
 
     @property
     def experiment_name(self):
+        """Experiment name (as in WebLab-Deusto)"""
         return self._experiment_name
 
     @property
     def category_name(self):
+        """Experiment category name (as in WebLab-Deusto)"""
         return self._category_name
 
     @property
     def experiment_id(self):
+        """Experiment id (as in WebLab-Deusto)"""
         return self._experiment_id
 
     @property
     def full_name(self):
+        """User full name"""
         return self._full_name
 
     @property
     def locale(self):
+        """Language requested by the system (e.g., was the user using Moodle in Spanish?). 'es'"""
         return self._locale
 
     @property
     def back(self):
+        """URL of the previous website. When the user has finished, redirect him there"""
         return self._back
 
     @property
     def last_poll(self):
+        """Last time the user called poll() (can be done by an automated process)"""
         return self._last_poll
 
     @property
     def session_id(self):
+        """Session identifying the current user"""
         return self._session_id
 
     @property
     def max_date(self):
+        """When should the user finish"""
         return self._max_date
 
     @property
     def username(self):
+        """
+        Username of the user. Note: this is short, but not unique across institutions. 
+        There could be a ``john`` in ``institutionA`` and another ``john`` in ``institutionB``
+        """
         return self._username
 
     @property
     def username_unique(self):
+        """
+        Unique username across institutions. It's ``john@institutionA`` (which is 
+        different to ``john@institutionB``)
+        """
         return self._username_unique
 
     @property
     def exited(self):
+        """
+        Did the user call :func:`logout`?
+        """
         return self._exited
 
     @property
     def data(self):
+        """
+        User data. By default an empty dictionary. 
+        You can access to it and modify it across processes.
+        See also :meth:`CurrentUser.update_data`.
+        """
         return self._data
 
     @data.setter
@@ -1146,14 +1289,14 @@ class CurrentUser(WebLabUser):
 
     def update_data(self, new_data = _OBJECT):
         """
-        Updates data:
+        Updates data::
 
-        task.data['foo'] = 'bar'
-        task.update_data()
+            task.data['foo'] = 'bar'
+            task.update_data()
 
-        or:
+        or::
 
-        task.update_data({'foo': 'bar'})
+            task.update_data({'foo': 'bar'})
         """
         if new_data == _OBJECT:
             new_data = self._data
@@ -1188,6 +1331,51 @@ class CurrentUser(WebLabUser):
 
     @property
     def user(self):
+        """
+        Load a related user from a database or similar. You might want to keep information about
+        the current user and use this information across sessions, depending on your laboratory.
+        Examples of this could be logs, or shared resources (e.g., storing the last actions of
+        the user for the next time they log in). So as to load the user from the database, you
+        can use :meth:`WebLab.user_loader` to define a user loader, and use this property to access
+        later to it.
+
+        For example, using `Flask-SQLAlchemy <http://flask-sqlalchemy.pocoo.org/>`_::
+
+           from mylab.models import LaboratoryUser
+
+           @weblab.on_start
+           def start(client_data, server_data):
+               # ...
+               user = LaboratoryUser.query.filter(identifier.username_unique).first()
+               if user is None:
+                   # Make sure the user exists in the database
+                   user_folder = create_user_folder()
+                   user = LaboratoryUser(username=weblab_user.username, 
+                                     identifier=username_unique,
+                                     user_folder=user_folder)
+                   db.session.add(user)
+                   db.session.commit()
+
+
+           @weblab.user_loader
+           def loader(username_unique):
+               return LaboratoryUser.query.filter(identifier=username_unique).first()
+               
+           # And then later:
+
+           @app.route('/lab')
+           @requires_active
+           def home():
+               user_db = weblab_user.user
+               open(os.path.join(user_db.user_folder, 'myfile.txt')).read()
+
+           @app.route('/files')
+           @requires_active
+           def files():
+               user_folder = weblab_user.user.user_folder
+               # ...
+
+        """
         user_loader = _current_weblab()._user_loader
         if user_loader is None:
             return None
@@ -1205,10 +1393,12 @@ class CurrentUser(WebLabUser):
 
     @property
     def active(self):
+        """Is the user active and has not called :func:`logout`?"""
         return not self._exited
 
     @property
     def is_anonymous(self):
+        """Is the user anonymous? ``False``"""
         return False
 
     def __str__(self):
@@ -1217,9 +1407,11 @@ class CurrentUser(WebLabUser):
 @six.python_2_unicode_compatible
 class ExpiredUser(WebLabUser):
     """
-    This class represents a user which has been kicked out already. Typically this ExpiredUser is kept in redis for around an hour.
+    This class is a :class:`WebLabUser` representing a user which has been kicked out already. 
+    Typically this ExpiredUser is kept in redis for around an hour (it depends on
+    ``WEBLAB_EXPIRED_USERS_TIMEOUT`` setting).
 
-    All the fields are same as in User.
+    Most of the fields are same as in :class:`CurrentUser`.
     """
     def __init__(self, session_id, back, max_date, username, username_unique, data, locale,
                  full_name, experiment_name, category_name, experiment_id):
@@ -1237,46 +1429,68 @@ class ExpiredUser(WebLabUser):
 
     @property
     def experiment_name(self):
+        """Experiment name (as in WebLab-Deusto)"""
         return self._experiment_name
 
     @property
     def category_name(self):
+        """Experiment category name (as in WebLab-Deusto)"""
         return self._category_name
 
     @property
     def experiment_id(self):
+        """Experiment id (as in WebLab-Deusto)"""
         return self._experiment_id
 
     @property
     def full_name(self):
+        """User full name"""
         return self._full_name
 
     @property
     def locale(self):
+        """Language requested by the system (e.g., was the user using Moodle in Spanish?). 'es'"""
         return self._locale
 
     @property
     def back(self):
+        """URL of the previous website. When the user has finished, redirect him there"""
         return self._back
 
     @property
     def session_id(self):
+        """Session identifying the current user"""
         return self._session_id
 
     @property
     def max_date(self):
+        """When should the user finish"""
         return self._max_date
 
     @property
     def username(self):
+        """
+        Username of the user. Note: this is short, but not unique across institutions. 
+        There could be a ``john`` in ``institutionA`` and another ``john`` in ``institutionB``
+        """
         return self._username
 
     @property
     def username_unique(self):
+        """
+        Unique username across institutions. It's ``john@institutionA`` (which is 
+        different to ``john@institutionB``)
+        """
         return self._username_unique
 
     @property
     def data(self):
+        """
+        User data. By default an empty dictionary. 
+        You can access to it and modify it across processes.
+
+        Do not change this data in :class:`ExpiredUser`.
+        """
         return self._data
 
     @data.setter
@@ -1284,18 +1498,28 @@ class ExpiredUser(WebLabUser):
         raise NotImplementedError("You can't change data on an ExpiredUser")
 
     def update_data(self, value=None):
+        """Update data. Not implemented in :class:`ExpiredUser` (expect an error)"""
         raise NotImplementedError("You can't change data on an ExpiredUser")
 
     @property
     def time_left(self):
+        """
+        Seconds left (always 0 in this case)
+        """
         return 0
 
     @property
     def active(self):
+        """
+        Is it an active user? (``False``)
+        """
         return False
 
     @property
     def is_anonymous(self):
+        """
+        Is it an anonymous user? (``False``)
+        """
         return False
 
     def __str__(self):
@@ -1335,9 +1559,22 @@ def poll():
 
 def get_weblab_user(cached=True):
     """
-    Get the current user. Optionally, return the ExpiredUser if the current one expired.
+    Get the current user. If ``cached=True`` it will store it and return the same each time.
+    If you need to get always a different one get it with ``cached=False``. In long tasks, for
+    example, it's normal to call it with ``cached=False`` so it gets updated with whatever
+    information comes from other threads.
 
-    @active_only: if set to True, do not return a expired user (and None instead)
+    Two shortcuts exist to this function:
+     * :data:`weblab_user`: it is equivalent to ``get_weblab_user(cached=True)``
+     * :data:`socket_weblab_user`: it is equivalent to ``get_weblab_user(cached=False)``
+
+    Given that the function always returns a :class:`CurrentUser` or :class:`ExpiredUser` or :class:`AnonymousUser`, it's safe to do things like::
+
+       if not weblab_user.anonymous:
+           print(weblab_user.username)
+           print(weblab_user.username_unique)
+
+    :param cached: if this method is called twice in the same thread, it will return the same object.
     """
     if cached and hasattr(g, 'weblab_user'):
         return g.weblab_user
@@ -1380,7 +1617,9 @@ current_task_stopping = LocalProxy(_current_task_stopping)
 
 def requires_login(func):
     """
-    Decorator. Requires the user to be logged in (and be a current user or not).
+    Decorator. Requires the user to have logged in. For example, the user might have finished
+    but you still want to display his/her results or similar. With this method, the user will
+    still be able to use this method. Don't use it with sensors, etc.
     """
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -1394,7 +1633,8 @@ def requires_login(func):
 
 def requires_active(func):
     """
-    Decorator. Requires the user to be a valid current user.
+    Decorator. Requires the user to be an active user. If the user is not logged in
+    or his/her time expired or he called ``logout``, the method will not be called.
     """
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -1409,7 +1649,12 @@ def requires_active(func):
 
 def socket_requires_login(func):
     """
-    Decorator. Requires the user to be a user (expired or active); otherwise it calls socketio_disconnect
+    Decorator. Requires the user to be a user (expired or active); otherwise it calls 
+    Flask-SocketIO disconnect. 
+
+    Essentially, equivalent to :func:`requires_login`, but calling ``disconnect``. And obtaining
+    the information in real time (important in Flask-SocketIO events, where the same thread
+    is used for all the events and :func:`requires_login` caches the user data).
     """
     if not _FLASK_SOCKETIO:
         print("Warning: using socket_requires_active on {} but Flask-SocketIO was not properly imported). Nothing is done.".format(func))
@@ -1426,7 +1671,12 @@ def socket_requires_login(func):
 
 def socket_requires_active(func):
     """
-    Decorator. Requires the user to be an active user; otherwise it calls socketio_disconnect
+    Decorator. Requires the user to be a user (only active); otherwise it calls 
+    Flask-SocketIO disconnect. 
+
+    Essentially, equivalent to :func:`requires_active`, but calling ``disconnect``. And obtaining
+    the information in real time (important in Flask-SocketIO events, where the same thread
+    is used for all the events and :func:`requires_active` caches the user data)
     """
     if not _FLASK_SOCKETIO:
         print("Warning: using socket_requires_active on {} but Flask-SOCKETIO was not properly imported. Nothing is done.".format(func))
@@ -1444,6 +1694,11 @@ def socket_requires_active(func):
 def logout():
     """
     Notify WebLab-Deusto that the user left the laboratory, so next user can enter.
+
+    This process is not real time. What it happens is that WebLab-Deusto periodically is requesting
+    whether the user is still alive or not. If you call logout, weblablib will reply the next time
+    that the user left. So it may take some seconds for WebLab-Deusto to realize of that. You can
+    regulate this time with ``WEBLAB_POLL_INTERVAL`` setting (defaults to 5).
     """
     session_id = _current_session_id()
     if session_id:
@@ -2028,7 +2283,7 @@ class _RedisManager(object):
 #
 
 class WebLabError(Exception):
-    """Wraps weblab exceptions"""
+    """Wraps all weblab exceptions"""
     pass
 
 class NoContextError(WebLabError):
@@ -2041,12 +2296,16 @@ class InvalidConfigError(WebLabError, ValueError):
     pass
 
 class WebLabNotInitializedError(WebLabError):
+    """Requesting a WebLab object when ``weblab.init_app`` has not been called."""
     pass
 
 class TimeoutError(WebLabError):
+    """When joining (:meth:`WebLabTask.join`) a task with a timeout, this error may arise""" 
     pass
 
 class AlreadyRunningError(WebLabError):
+    """When creating a task (:meth:`WebLab.task`) with ``ensure_unique=True``, the second 
+    thread/process attempting to run the same method will obtain this error"""
     pass
 
 class _NotFoundError(WebLabError, KeyError):
@@ -2063,6 +2322,9 @@ class _TaskWrapper(object):
         self._func = func
         self._ensure_unique = ensure_unique
         self._name = func.__name__
+        if len(self._name) == len(_create_token()):
+            raise ValueError("The function '{}' has an invalid name: the number of characters must be higher or  lower than this. Otherwise get_task(task_id) could potentially fail".format(func.__name__))
+
         self._weblab = weblab
         self._redis_manager = weblab._redis_manager
 
@@ -2135,9 +2397,20 @@ class WebLabTask(object):
 
     Or simply::
 
-        tasks = weblab.get_tasks()
+        tasks = weblab.tasks
 
     You are not supposed to create this object.
+
+    The life cycle is very simple:
+
+     * They all start in ``submitted`` (so :data:`WebLabTask.submitted`)
+     * When a worker takes them, it is ``running`` (:data:`WebLabTask.running`)
+     * The task can be finished (:data:`WebLabTask.finished`)  due to two reasons:
+
+       * because it fails (:data:`WebLabTask.failed`), in which case you can check :data:`WebLabTask.error`.
+       * or because it works (:data:`WebLabTask.done`), in which case you can check :data:`WebLabTask.result`.
+
+    See also :meth:`WebLab.task`.
     """
     def __init__(self, weblab, task_id):
         self._weblab = weblab
@@ -2146,10 +2419,14 @@ class WebLabTask(object):
 
     def join(self, timeout=None, error_on_timeout=True):
         """
-        Wait for the task to finish. timeout is seconds, if set it will raise an exception
+        Wait for the task to finish. timeout (in seconds), if set it will raise an exception
         if error_on_timeout, otherwise it will just finish. You can't call this method from
-        the task itself (a RuntimeError will be raised). You must avoid calling this from
-        one task and then waiting the current task from the other.
+        the task itself (a :class:`TimeoutError` will be raised). 
+
+        Be aware that if task1 starts task2 and joins, and task2 joins task1 a deadlock will happen.
+
+        :param timeout: ``None`` (to wait forever) or number of seconds to wait. It accepts float.
+        :param error_on_timeout: if ``True``, a :class:`TimeoutError` will be raised.
         """
         if current_task:
             if current_task.task_id == self._task_id:
@@ -2178,7 +2455,7 @@ class WebLabTask(object):
     @property
     def session_id(self):
         """
-        The current ``session_id`` for WebLab-Deusto
+        The current ``session_id`` that represents this session.
         """
         task_data = self._task_data
         if task_data:
@@ -2239,21 +2516,42 @@ class WebLabTask(object):
 
     def stop(self):
         """
-        Raise a flag so ``stopping`` becomes ``True``. This method does not guarantee anything.
-        It only provides a flag (``current_task_stopping``) to the task implementor, who might
-        or might not use it.
+        Raise a flag so :data:`WebLabTask.stopping` becomes ``True``. This method does not 
+        guarantee anything: it only provides a flag so the task implementor can use it to
+        stop earlier or stop any loop, by reading :data:`current_task_stopping`.
+
+        Example::
+
+            @weblab.task()
+            def read_serial():
+                while not current_task_stopping:
+                      data = read()
+                      process(data)
+
+            # Outside:
+            task.stop() # Causing the loop to finish
         """
         self._redis_manager.request_stop_task(self.task_id)
 
     @property
     def status(self):
         """
-        Current status:
-         - submitted (not yet processed by a thread)
-         - done (finished)
-         - failed (there was an error)
-         - running (still running in a thread)
-         - None (if the task does not exist anymore)
+        Current status, as string:
+
+         * ``'submitted'`` (not yet processed by a thread)
+         * ``'done'`` (finished)
+         * ``'failed'`` (there was an error)
+         * ``'running'`` (still running in a thread)
+         * ``None`` (if the task does not exist anymore)
+
+        instead of comparing strings, you're encouraged to use:
+
+         * :data:`WebLabTask.done`
+         * :data:`WebLabTask.failed`
+         * :data:`WebLabTask.running`
+         * :data:`WebLabTask.submitted`
+         * :data:`WebLabTask.finished` (which is is ``True`` if ``done`` or ``failed``)
+
         """
         task_data = self._task_data
         if task_data:
@@ -2268,7 +2566,7 @@ class WebLabTask(object):
     def running(self):
         """
         Is the task still running? Note that this is False if it was submitted and not yet started.
-        If you want to know in general if it has finished or not, use 'finished'
+        If you want to know in general if it has finished or not, use :data:`WebLabTask.finished`
         """
         return self.status == 'running'
 
@@ -2292,7 +2590,7 @@ class WebLabTask(object):
     @property
     def stopping(self):
         """
-        Did anyone call ``stop()``? If so, you should stop running the current task.
+        Did anyone call :meth:`WebLabTask.stop`? If so, you should stop running the current task.
         """
         task_data = self._task_data
         if task_data:
@@ -2301,8 +2599,8 @@ class WebLabTask(object):
     @property
     def result(self):
         """
-        In case of finishing (task.status == 'done'), this returns the result.
-        Otherwise, it returns None.
+        In case of having finished succesfully (:data:`WebLabTask.done` being ``True``), this 
+        returns the result. Otherwise, it returns ``None``.
         """
         task_data = self._task_data
         if task_data:
@@ -2311,8 +2609,16 @@ class WebLabTask(object):
     @property
     def error(self):
         """
-        In case of error (task.status == 'failed'), this returns the Exception
-        that caused the error. Otherwise, it returns None.
+        In case of finishing with an exception (:data:`WebLabTask.failed` being ``True``), this
+        returns information about the error caused. Otherwise, it returns ``None``.
+
+        The information is provided in a dictionary as follows::
+
+           {
+              'code': 'exception',
+              'class': 'ExampleError',
+              'message': '<result of converting the error in string>'
+           }
         """
         task_data = self._task_data
         if task_data:
@@ -2432,7 +2738,7 @@ def _status_time(session_id):
     if user.time_left <= 0:
         return -1
 
-    return min(5, int(user.time_left))
+    return min(weblab.poll_interval, int(user.time_left))
 
 def _update_weblab_user_data(response):
     # If a developer does:

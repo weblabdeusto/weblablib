@@ -3,6 +3,8 @@
 Advanced features
 =================
 
+.. _tasks:
+
 Tasks
 -----
 
