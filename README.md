@@ -39,7 +39,6 @@ from weblablib import WebLab, weblab_user, requires_active
 app = Flask(__name__)
 app.config.update({
     'SECRET_KEY': 'secret', # MUST CHANGE
-    'WEBLAB_CALLBACK_URL': '/callback',
     'WEBLAB_USERNAME': 'weblabdeusto',
     'WEBLAB_PASSWORD': 'password',
 })
