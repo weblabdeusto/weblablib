@@ -1,16 +1,24 @@
+:tocdepth: 2
+
 .. weblablib documentation master file, created by
    sphinx-quickstart on Mon Aug  7 15:23:17 2017.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-weblablib - development
-=======================
+weblablib - 0.4
+===============
 
-.. warning::
-
-    This is the documentation of the development version.
-
-    Go to https://docs.labsland.com/weblablib/ for the latest stable version.
+..
+.. weblablib - development
+.. =======================
+..
+..
+.. .. warning::
+..
+..    This is the documentation of the development version.
+..
+..    Go to https://docs.labsland.com/weblablib/ for the latest stable version.
+..
 
 weblablib is a library for creating `WebLab-Deusto <https://github.com/weblabdeusto/weblabdeusto/>`_ remote laboratories.
 

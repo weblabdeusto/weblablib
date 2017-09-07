@@ -118,6 +118,7 @@ html_theme_options = {
     'github_user': 'weblabdeusto',
     'github_repo': 'weblablib',
     'github_banner': True,
+    'fixed_sidebar': True,
 }
 
 # Add any paths that contain custom themes here, relative to this directory.
