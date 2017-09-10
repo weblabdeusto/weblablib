@@ -227,7 +227,7 @@ class WebLab(object):
         self._app = app
         self._base_url = base_url
         self._callback_url = callback_url
-        self._redis_client = None
+        self._redis_manager = None
 
         self.poll_interval = 5
         self.cleaner_thread_interval = 5
@@ -674,6 +674,11 @@ class WebLab(object):
                     self._task_threads.append(task_thread)
                     task_thread.start()
 
+        for task_wrapper in self._task_functions.values():
+            if task_wrapper.ensure_unique:
+                func = task_wrapper.func
+                self._redis_manager.clean_lock_unique_task(func.__name__)
+
         self._initialized = True
 
     def _session_id(self):
@@ -906,7 +911,7 @@ class WebLab(object):
             if func.__name__ in self._task_functions:
                 raise ValueError("You can't have two tasks with the same name ({})".format(func.__name__))
 
-            if ensure_unique:
+            if ensure_unique and self._initialized:
                 self._redis_manager.clean_lock_unique_task(func.__name__)
 
             self._task_functions[func.__name__] = wrapper
@@ -2328,6 +2333,14 @@ class _TaskWrapper(object):
 
         self._weblab = weblab
         self._redis_manager = weblab._redis_manager
+
+    @property
+    def func(self):
+        return self._func
+
+    @property
+    def ensure_unique(self):
+        return self._ensure_unique
 
     def __call__(self, *args, **kwargs):
         """Runs the function in the same way, directly, without catching errors"""

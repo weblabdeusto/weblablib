@@ -74,6 +74,10 @@ class BaseWebLabTest(unittest.TestCase):
             'Authorization': 'Basic ' + base64.encodestring(b'wrong_weblabdeusto:wrong_password').decode('utf8').strip(),
         }
 
+        @self.weblab.task(ensure_unique=True)
+        def task_before_init():
+            return True
+
         self.weblab.init_app(self.app)
         self.weblab._redis_manager.client.flushall()
 
