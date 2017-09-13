@@ -1,6 +1,6 @@
 # weblablib
 
-[![documentation](https://readthedocs.org/projects/weblablib/badge/?version=stable)](https://docs.labsland.com/weblablib/)
+[![documentation](https://readthedocs.org/projects/weblablib/badge/?version=latest)](https://docs.labsland.com/weblablib/)
 [![Version](https://img.shields.io/pypi/v/weblablib.svg)](https://pypi.python.org/pypi/weblablib/)
 [![Python versions](https://img.shields.io/pypi/pyversions/weblablib.svg)](https://pypi.python.org/pypi/weblablib/)
 [![build status](https://travis-ci.org/weblabdeusto/weblablib.svg?branch=master)](https://travis-ci.org/weblabdeusto/weblablib)
