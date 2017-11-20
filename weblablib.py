@@ -581,11 +581,13 @@ class WebLab(object):
                 'back': back,
             }
 
+            initial_time = time.time()
             result = _weblab_api_request('weblab._start_session', request_data)
+            final_time = time.time()
 
             if 'url' in result:
                 print()
-                print("Congratulations! The session is started")
+                print("Congratulations! The session is started [in {:.2f} seconds]".format(final_time - initial_time))
                 print()
                 print("Open: {}".format(result['url']))
                 print()
