@@ -89,6 +89,18 @@ Alternatively, you can do also:
  $ flask run
 ```
 
+If you have installed Flask-SocketIO (e.g., if you run the ``complete`` example and then you come back to this one), then you might encounter the following error:
+```shell
+
+ $ flask run
+ File "/usr/lib/python3.5/signal.py", line 47, in signal
+    handler = _signal.signal(_enum_to_int(signalnum), _enum_to_int(handler))
+    ValueError: signal only works in main thread
+ $
+```
+
+In that case, it is safer to simply run ``python run_debug.py``.
+
 Since ``localrc`` already contains those variables.
 
 In Microsoft Windows:
