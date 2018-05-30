@@ -1188,12 +1188,7 @@ class AnonymousUser(WebLabUser):
 _OBJECT = object()
 
 @six.python_2_unicode_compatible
-class CurrentUser(WebLabUser):
-    """
-    This class is a :class:`WebLabUser` representing a user which is still actively using a
-    laboratory. If the session expires, it will become a :class:`ExpiredUser`.
-    """
-
+class _CurrentOrExpiredUser(WebLabUser):
     def __init__(self, session_id, back, last_poll, max_date, username, username_unique,
                  exited, data, locale, full_name, experiment_name, category_name, experiment_id):
         self._session_id = session_id
@@ -1278,6 +1273,36 @@ class CurrentUser(WebLabUser):
         """
         return self._exited
 
+    def add_action(self, session_id, action):
+        """
+        Adds a new raw action to a session_id, returning the action_id
+        """
+        action_id = create_token()
+        self.store_action(session_id, action_id, action)
+        return action_id
+
+    def store_action(self, session_id, action_id, action):
+        """
+        Adds a new raw action to a new or existing session_id
+        """
+        redis_manager = _current_redis()
+        redis_manager.store_action(session_id, action_id, action)
+
+    def clean_actions(self, session_id):
+        """
+        Remove all actions of a session_id
+        """
+        redis_manager = _current_redis()
+        redis_manager.clean_actions(session_id)
+
+
+@six.python_2_unicode_compatible
+class CurrentUser(_CurrentOrExpiredUser):
+    """
+    This class is a :class:`WebLabUser` representing a user which is still actively using a
+    laboratory. If the session expires, it will become a :class:`ExpiredUser`.
+    """
+
     @property
     def data(self):
         """
@@ -1330,6 +1355,7 @@ class CurrentUser(WebLabUser):
         Create a ExpiredUser based on the data of the user
         """
         return ExpiredUser(session_id=self._session_id, back=self._back, max_date=self._max_date,
+                           last_poll=self._last_poll, exited=self._exited,
                            username=self._username, username_unique=self._username_unique,
                            data=self._data, locale=self._locale, full_name=self._full_name,
                            experiment_name=self._experiment_name, category_name=self._category_name,
@@ -1411,7 +1437,7 @@ class CurrentUser(WebLabUser):
         return 'Current user (id: {!r}): {!r} ({!r}), last poll: {:.2f} seconds ago. Max date in {:.2f} seconds. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self.time_without_polling, self._max_date - _current_timestamp(), self._back)
 
 @six.python_2_unicode_compatible
-class ExpiredUser(WebLabUser):
+class ExpiredUser(_CurrentOrExpiredUser):
     """
     This class is a :class:`WebLabUser` representing a user which has been kicked out already.
     Typically this ExpiredUser is kept in redis for around an hour (it depends on
@@ -1419,76 +1445,6 @@ class ExpiredUser(WebLabUser):
 
     Most of the fields are same as in :class:`CurrentUser`.
     """
-    def __init__(self, session_id, back, max_date, username, username_unique, data, locale,
-                 full_name, experiment_name, category_name, experiment_id):
-        self._session_id = session_id
-        self._back = back
-        self._max_date = max_date
-        self._username = username
-        self._username_unique = username_unique
-        self._data = data
-        self._locale = locale
-        self._full_name = full_name
-        self._experiment_name = experiment_name
-        self._category_name = category_name
-        self._experiment_id = experiment_id
-
-    @property
-    def experiment_name(self):
-        """Experiment name (as in WebLab-Deusto)"""
-        return self._experiment_name
-
-    @property
-    def category_name(self):
-        """Experiment category name (as in WebLab-Deusto)"""
-        return self._category_name
-
-    @property
-    def experiment_id(self):
-        """Experiment id (as in WebLab-Deusto)"""
-        return self._experiment_id
-
-    @property
-    def full_name(self):
-        """User full name"""
-        return self._full_name
-
-    @property
-    def locale(self):
-        """Language requested by the system (e.g., was the user using Moodle in Spanish?). 'es'"""
-        return self._locale
-
-    @property
-    def back(self):
-        """URL of the previous website. When the user has finished, redirect him there"""
-        return self._back
-
-    @property
-    def session_id(self):
-        """Session identifying the current user"""
-        return self._session_id
-
-    @property
-    def max_date(self):
-        """When should the user finish"""
-        return self._max_date
-
-    @property
-    def username(self):
-        """
-        Username of the user. Note: this is short, but not unique across institutions.
-        There could be a ``john`` in ``institutionA`` and another ``john`` in ``institutionB``
-        """
-        return self._username
-
-    @property
-    def username_unique(self):
-        """
-        Unique username across institutions. It's ``john@institutionA`` (which is
-        different to ``john@institutionB``)
-        """
-        return self._username_unique
-
     @property
     def data(self):
         """
@@ -1971,14 +1927,14 @@ class _RedisManager(object):
         pipeline = self.client.pipeline()
         key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
         for name in ('back', 'max_date', 'username', 'username-unique', 'data', 'locale',
-                     'full_name', 'experiment_name', 'category_name', 'experiment_id'):
+                     'full_name', 'experiment_name', 'category_name', 'experiment_id', 'exited', 'last_poll'):
             pipeline.hget(key, name)
 
         (back, max_date, username, username_unique, data, locale,
-         full_name, experiment_name, category_name, experiment_id) = pipeline.execute()
+         full_name, experiment_name, category_name, experiment_id, exited, last_poll) = pipeline.execute()
 
         if max_date is not None:
-            return ExpiredUser(session_id=session_id, back=back, max_date=float(max_date),
+            return ExpiredUser(session_id=session_id, last_poll=last_poll, back=back, max_date=float(max_date), exited=exited,
                                username=username, username_unique=username_unique,
                                data=json.loads(data),
                                locale=json.loads(locale),
@@ -2073,6 +2029,32 @@ class _RedisManager(object):
         if max_date is None:
             # If the user was deleted in between, revert the last_poll
             self.client.delete(key)
+
+    # 
+    # Storage-related Redis methods
+    def store_action(self, session_id, action_id, action):
+        if not isinstance(action, dict):
+            raise ValueError("Actions must be dictionaries of data")
+
+        raw_action = {
+            'ts': time.time(),
+        }
+        raw_action.update(action)
+
+        key = '{}:weblab:storage:{}'.format(self.key_base, session_id)
+
+        pipeline = self.client.pipeline()
+        pipeline.hset(key, action_id, json.dumps(raw_action))
+        pipeline.expire(key, 3600 * 24) # Store in memory for maximum 24 hours
+        pipeline.execute()
+
+    def clean_actions(self, session_id):
+        """
+        Deletes all the stored actions for a session_id. Frees memory, so
+        WebLab-Deusto should call it after obtaining the data.
+        """
+        key = '{}:weblab:storage:{}'.format(self.key_base, session_id)
+        self.client.delete(key)
 
     #
     # Task-related Redis methods
@@ -2735,6 +2717,8 @@ def _create_token(size=None):
     safe_token = base64.urlsafe_b64encode(tok).strip().replace(b'=', b'').replace(b'-', b'_')
     safe_token = safe_token.decode('utf8')
     return safe_token
+
+create_token = _create_token
 
 def _status_time(session_id):
     weblab = _current_weblab()
