@@ -1187,7 +1187,6 @@ class AnonymousUser(WebLabUser):
 
 _OBJECT = object()
 
-@six.python_2_unicode_compatible
 class _CurrentOrExpiredUser(WebLabUser):
     def __init__(self, session_id, back, last_poll, max_date, username, username_unique,
                  exited, data, locale, full_name, experiment_name, category_name, experiment_id):
