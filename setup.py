@@ -22,9 +22,14 @@ classifiers=[
 
 cp_license="GNU AGPL v3"
 
+with open("README.md", "r") as fh:
+    long_description = fh.read()
+
 setup(name='weblablib',
       version='0.5',
       description="WebLab-Deusto library for creating unmanaged laboratories",
+      long_description=long_description,
+      long_description_content_type="text/markdown",
       classifiers=classifiers,
       zip_safe=False,
       author='LabsLand',
