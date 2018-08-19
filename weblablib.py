@@ -442,18 +442,26 @@ class WebLab(object):
 
             return Markup("""<script>
                 var WEBLAB_TIMEOUT = null;
+                var WEBLAB_RETRIES = 3;
                 if (window.jQuery !== undefined) {
-                    WEBLAB_TIMEOUT = setInterval(function () {
+                    var WEBLAB_INTERVAL_FUNCTION = function(){
                         $.get("%(url)s").done(function(result) {
                             if(!result.success) {
                                 clearInterval(WEBLAB_TIMEOUT);
                                 %(callback_code)s
+                            } else {
+                                WEBLAB_RETRIES = 3;
                             }
-                        }).fail(function() {
-                            clearInterval(WEBLAB_TIMEOUT);
-                            %(callback_code)s
+                        }).fail(function(errorData) {
+                            if (WEBLAB_RETRIES > 0 && (errorData.status == 502 || errorData.status == 503)) {
+                                WEBLAB_RETRIES -= 1;
+                            } else {
+                                clearInterval(WEBLAB_TIMEOUT);
+                                %(callback_code)s
+                            }
                         });
-                    }, %(timeout)s );
+                    }
+                    WEBLAB_TIMEOUT = setInterval(WEBLAB_INTERVAL_FUNCTION, %(timeout)s );
                     %(logout_code)s
                 } else {
                     var msg = "weblablib error: jQuery not loaded BEFORE {{ weblab_poll_script() }}. Can't poll";
