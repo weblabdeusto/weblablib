@@ -85,7 +85,7 @@ __all__ = ['WebLab',
            'AlreadyRunningError', 'CurrentUser', 'AnonymousUser',
            'ExpiredUser']
 
-__version__ = '0.5'
+__version__ = '0.4.1'
 __license__ = 'GNU Affero General Public License v3 http://www.gnu.org/licenses/agpl.html'
 
 class ConfigurationKeys(object):

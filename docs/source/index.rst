@@ -5,16 +5,8 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-weblablib - development
-=======================
-
-
-.. warning::
-
-   This is the documentation of the development version.
-
-   Go to https://docs.labsland.com/weblablib/ for the latest stable version.
-
+weblablib - 0.4.1
+=================
 
 weblablib is a library for creating `WebLab-Deusto <https://github.com/weblabdeusto/weblabdeusto/>`_ remote laboratories.
 

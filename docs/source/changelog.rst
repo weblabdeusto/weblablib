@@ -3,6 +3,17 @@
 Changelog
 =========
 
+Version 0.4.1
+-------------
+
+Link: https://docs.labsland.com/weblablib/en/0.4.1/
+
+Bug fixes:
+^^^^^^^^^^
+
+In some contexts, the poll message receives a temporary error (such as 502). In those cases we try a couple of seconds later instead of automatically kicking out the user.
+
+
 Version 0.4
 -----------
 

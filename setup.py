@@ -26,7 +26,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(name='weblablib',
-      version='0.5',
+      version='0.4.1',
       description="WebLab-Deusto library for creating unmanaged laboratories",
       long_description=long_description,
       long_description_content_type="text/markdown",
