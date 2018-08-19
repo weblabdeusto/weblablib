@@ -455,6 +455,7 @@ class WebLab(object):
                         }).fail(function(errorData) {
                             if (WEBLAB_RETRIES > 0 && (errorData.status == 502 || errorData.status == 503)) {
                                 WEBLAB_RETRIES -= 1;
+                                setTimeout(WEBLAB_INTERVAL_FUNCTION, 1500); // Force a try-again in 1.5 seconds
                             } else {
                                 clearInterval(WEBLAB_TIMEOUT);
                                 %(callback_code)s
