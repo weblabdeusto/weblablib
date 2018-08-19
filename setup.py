@@ -1,5 +1,6 @@
 #-*-*- encoding: utf-8 -*-*-
 from setuptools import setup
+from collections import OrderedDict
 
 classifiers=[
     "Development Status :: 4 - Beta",
@@ -26,10 +27,15 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(name='weblablib',
-      version='0.4.1',
+      version='0.4.2',
       description="WebLab-Deusto library for creating unmanaged laboratories",
       long_description=long_description,
       long_description_content_type="text/markdown",
+      project_urls=OrderedDict((
+            ('Documentation', 'https://docs.labsland.com/weblablib/en/stable/'),
+            ('Code', 'https://github.com/weblabdeusto/weblablib'),
+            ('Issue tracker', 'https://github.com/weblabdeusto/weblablib/issues'),
+      )),
       classifiers=classifiers,
       zip_safe=False,
       author='LabsLand',
