@@ -1367,7 +1367,7 @@ class CurrentUser(_CurrentOrExpiredUser):
                            username=self._username, username_unique=self._username_unique,
                            data=self._data, locale=self._locale, full_name=self._full_name,
                            experiment_name=self._experiment_name, category_name=self._category_name,
-                           experiment_id=self._experiment_id)
+                           experiment_id=self._experiment_id, disposing_resources=True)
 
     @property
     def user(self):
@@ -1453,6 +1453,11 @@ class ExpiredUser(_CurrentOrExpiredUser):
 
     Most of the fields are same as in :class:`CurrentUser`.
     """
+    def __init__(self, *args, **kwargs):
+        disposing_resources = kwargs.pop('disposing_resources', False)
+        super(ExpiredUser, self).__init__(*args, **kwargs)
+        self.disposing_resources = disposing_resources
+
     @property
     def data(self):
         """
@@ -1935,11 +1940,11 @@ class _RedisManager(object):
         pipeline = self.client.pipeline()
         key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
         for name in ('back', 'max_date', 'username', 'username-unique', 'data', 'locale',
-                     'full_name', 'experiment_name', 'category_name', 'experiment_id', 'exited', 'last_poll'):
+                     'full_name', 'experiment_name', 'category_name', 'experiment_id', 'exited', 'last_poll', 'disposing_resources'):
             pipeline.hget(key, name)
 
         (back, max_date, username, username_unique, data, locale,
-         full_name, experiment_name, category_name, experiment_id, exited, last_poll) = pipeline.execute()
+         full_name, experiment_name, category_name, experiment_id, exited, last_poll, disposing_resources) = pipeline.execute()
 
         if max_date is not None:
             return ExpiredUser(session_id=session_id, last_poll=last_poll, back=back, max_date=float(max_date), exited=exited,
@@ -1949,7 +1954,8 @@ class _RedisManager(object):
                                full_name=json.loads(full_name),
                                experiment_name=json.loads(experiment_name),
                                category_name=json.loads(category_name),
-                               experiment_id=json.loads(experiment_id))
+                               experiment_id=json.loads(experiment_id),
+                               disposing_resources=json.loads(disposing_resources))
 
         return AnonymousUser()
 
@@ -1981,6 +1987,7 @@ class _RedisManager(object):
         pipeline.hset(key, "experiment_name", json.dumps(expired_user.experiment_name))
         pipeline.hset(key, "category_name", json.dumps(expired_user.category_name))
         pipeline.hset(key, "experiment_id", json.dumps(expired_user.experiment_id))
+        pipeline.hset(key, "disposing_resources", json.dumps(True))
 
         # During half an hour after being created, the user is redirected to
         # the original URL. After that, every record of the user has been deleted
@@ -1988,6 +1995,11 @@ class _RedisManager(object):
         results = pipeline.execute()
 
         return results[0] != 0 # If redis returns 0 on delete() it means that it was not deleted
+
+    def finished_dispose(self, session_id):
+        key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
+        if self.client.hset(key, "disposing_resources", json.dumps(False)) == 1:
+            self.client.delete(key)
 
     def force_exit(self, session_id):
         """
@@ -2732,6 +2744,9 @@ def _status_time(session_id):
     weblab = _current_weblab()
     redis_manager = weblab._redis_manager
     user = redis_manager.get_user(session_id)
+    if isinstance(user, ExpiredUser) and user.disposing_resources:
+        return 2 # Try again in 2 seconds
+
     if user.is_anonymous or not isinstance(user, CurrentUser):
         return -1
 
@@ -2779,15 +2794,18 @@ def _dispose_user(session_id, waiting):
         deleted = redis_manager.delete_user(session_id, current_expired_user)
 
         if deleted:
-            weblab = _current_weblab()
-            if weblab._on_dispose:
-                weblab._set_session_id(session_id)
-                _set_weblab_user_cache(user)
-                try:
-                    weblab._on_dispose()
-                except Exception:
-                    traceback.print_exc()
-                _update_weblab_user_data(None)
+            try:
+                weblab = _current_weblab()
+                if weblab._on_dispose:
+                    weblab._set_session_id(session_id)
+                    _set_weblab_user_cache(user)
+                    try:
+                        weblab._on_dispose()
+                    except Exception:
+                        traceback.print_exc()
+                    _update_weblab_user_data(None)
+            finally:
+                redis_manager.finished_dispose(session_id)
 
             unfinished_tasks = redis_manager.get_unfinished_tasks(session_id)
             for task_id in unfinished_tasks:

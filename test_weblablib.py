@@ -926,6 +926,58 @@ class EnsureUniqueTaskTest(BaseSessionWebLabTest):
         task.join()
         self.assertTrue(task.done)
 
+class LongDisposeErrorTest(BaseSessionWebLabTest):
+
+    def setUp(self):
+        super(LongDisposeErrorTest, self).setUp()
+        self.blocker_lock = threading.Lock()
+        self.first_notifier_lock = threading.Lock()
+        self.second_notifier_lock = threading.Lock()
+
+    def lab(self):
+        return ":-)"
+
+    def on_dispose(self):
+        self.first_notifier_lock.release()
+        self.blocker_lock.acquire()
+        self.blocker_lock.release()
+        self.second_notifier_lock.release()
+
+    def test_long_dispose(self):
+        # New user
+        launch_url1, session_id1 = self.new_user()
+
+        # So it will be blocked on the dispose
+        self.blocker_lock.acquire()
+
+        self.first_notifier_lock.acquire()
+        self.second_notifier_lock.acquire()
+
+        background_dispose = threading.Thread(target=lambda : self.dispose())
+        background_dispose.daemon = True
+        background_dispose.start()
+
+        # We acquire twice so we wait for the other thread to be running
+        self.first_notifier_lock.acquire()
+
+        # Now we know that dispose is blocked in the blocker_lock:
+
+        # We run status, as weblab would do to know if the student finished.
+        # It should not return -1, because it is still in dispose. It should
+        # wait for dispose to finish
+        status = self.status()
+        self.assertGreater(status['should_finish'], 0)
+
+        self.first_notifier_lock.release()
+        self.blocker_lock.release()
+
+        self.second_notifier_lock.acquire()
+        time.sleep(0.1) # If we are here we know that the thread has finished. Wait a bit
+
+        status = self.status()
+        self.assertEquals(status['should_finish'], -1)
+
+
 
 class DisposeErrorTest(BaseSessionWebLabTest):
 
