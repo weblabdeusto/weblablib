@@ -2424,7 +2424,7 @@ class _TaskWrapper(object):
                     raise AlreadyRunningError("This task ({}) has been sent in parallel and it is still running".format(self._name))
             elif self._unique == 'user':
                 session_id = _current_session_id()
-                locked = self._redis_manager.lock_user_unique_task(self._name)
+                locked = self._redis_manager.lock_user_unique_task(self._name, session_id)
                 if not locked:
                     raise AlreadyRunningError("This task ({}) has been sent in parallel by {} and it is still running".format(self._name, session_id))
         try:

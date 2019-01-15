@@ -933,7 +933,6 @@ class GlobalUniqueTaskTest(BaseSessionWebLabTest):
         task.join()
         self.assertTrue(task.done)
 
-@unittest.skip("Not yet ready")
 class UserUniqueTaskTest(BaseSessionWebLabTest):
 
     def get_config(self):
