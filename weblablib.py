@@ -1898,7 +1898,6 @@ def _dispose_experiment(session_id):
 #     Redis Management
 #
 
-
 class _RedisManager(object):
 
     def __init__(self, redis_url, key_base, task_expires, weblab):
@@ -2772,7 +2771,12 @@ class _TaskRunner(threading.Thread):
             try:
                 with self.app.app_context():
                     self.weblab.run_tasks()
-
+            except ConnectionError:
+                # In the case of a ConnectionError, let's wait a bit more to see if
+                # it happens again. It can be that we are just restarting the server
+                # and Redis died before, or a Redis upgrade or so.
+                traceback.print_exc()
+                time.sleep(5)
             except Exception:
                 traceback.print_exc()
                 continue
@@ -2934,6 +2938,12 @@ class _CleanerThread(threading.Thread):
             try:
                 with self.app.app_context():
                     self.weblab.clean_expired_users()
+            except redis.ConnectionError:
+                # In the case of a ConnectionError it can be
+                # that we're just restarting the server or so.
+                # Wait a bit further
+                traceback.print_exc()
+                time.sleep(5)
             except Exception:
                 traceback.print_exc()
 
