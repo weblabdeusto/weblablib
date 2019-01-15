@@ -1299,7 +1299,14 @@ class _CurrentOrExpiredUser(WebLabUser):
         """
         Information provided in the beginning of the interaction (on_start): client_data
         """
-        return self._request_client_data
+        return ImmutableDict(self._request_client_data or {})
+
+    @property
+    def request_server_data(self):
+        """
+        Information provided in the beginning of the interaction (on_start): server_data
+        """
+        return ImmutableDict(self._request_server_data or {})
 
     @property
     def start_date(self):
@@ -1307,13 +1314,6 @@ class _CurrentOrExpiredUser(WebLabUser):
         Information provided in the beginning of the interaction (on_start): client_data
         """
         return self._start_date
-
-    @property
-    def request_server_data(self):
-        """
-        Information provided in the beginning of the interaction (on_start): server_data
-        """
-        return self._request_server_data
 
     def add_action(self, session_id, action):
         """
