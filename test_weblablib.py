@@ -351,7 +351,9 @@ class BaseSessionWebLabTest(BaseWebLabTest):
         start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
 
         request_data = {
-            'client_initial_data': {},
+            'client_initial_data': {
+                'in_test': True,
+            },
             'server_initial_data': {
                 'priority.queue.slot.start': start_time,
                 'priority.queue.slot.length': assigned_time,
@@ -432,6 +434,8 @@ class UserTest(BaseSessionWebLabTest):
         self.assertEquals(weblablib.weblab_user.experiment_name, 'mylab')
         self.assertEquals(weblablib.weblab_user.category_name, 'Lab experiments')
         self.assertEquals(weblablib.weblab_user.experiment_id, 'mylab@Lab experiments')
+        self.assertEquals(weblablib.weblab_user.request_client_data['in_test'], True)
+        self.assertEquals(weblablib.weblab_user.request_server_data['request.username'], 'jim.smith')
 
         task_id = response.split('@@task@@')[1]
 
@@ -911,10 +915,10 @@ class GlobalUniqueTaskTest(BaseSessionWebLabTest):
         self.task_is_running = False
 
         @self.weblab.task(unique='global')
-        def task_unique():
+        def task_global_unique():
             return self.task()
 
-        self.unique_task = task_unique
+        self.unique_task = task_global_unique
 
         launch_url1, session_id1 = self.new_user()
 
@@ -926,6 +930,7 @@ class GlobalUniqueTaskTest(BaseSessionWebLabTest):
         task.join()
         self.assertTrue(task.done)
 
+@unittest.skip("Not yet ready")
 class UserUniqueTaskTest(BaseSessionWebLabTest):
 
     def get_config(self):
@@ -964,10 +969,10 @@ class UserUniqueTaskTest(BaseSessionWebLabTest):
         self.task_is_running = False
 
         @self.weblab.task(unique='user')
-        def task_unique():
+        def task_user_unique():
             return self.task()
 
-        self.unique_task = task_unique
+        self.unique_task = task_user_unique
 
         launch_url1, session_id1 = self.new_user()
 

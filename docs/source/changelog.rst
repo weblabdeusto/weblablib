@@ -9,6 +9,10 @@ Version 0.5.0
 
 Link: https://docs.labsland.com/weblablib/en/0.5.0/
 
+General
+^^^^^^^
+
+ * ``weblab_user`` now contains also ``weblab_user.request_client_data`` and ``weblab_user.request_server_data`` which provides the data passed on the ``on_start`` method.
 
 Tasks
 ^^^^^
