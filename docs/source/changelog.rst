@@ -3,6 +3,24 @@
 Changelog
 =========
 
+
+Version 0.5.0
+-------------
+
+Link: https://docs.labsland.com/weblablib/en/0.5.0/
+
+
+Tasks
+^^^^^
+
+ * ``ensure_unique`` has been replaced by ``unique='global'``. This allows us to put also ``unique='user'`` for concurrent laboratories.
+
+Bug fixes:
+^^^^^^^^^^
+
+ * If the ``on_dispose`` was long, it would happen that WebLab would consider the experiment already finished.
+
+
 Version 0.4.1
 -------------
 

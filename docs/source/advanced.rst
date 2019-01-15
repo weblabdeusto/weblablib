@@ -112,12 +112,21 @@ Another option of the ``@weblab.task()`` is to define tasks that there should be
 
 .. code-block:: python
 
-    @weblab.task(ensure_unique=True)
+    @weblab.task(unique='global')
     def my_task():
         # Do something with a resource
 
-If you start two tasks of this type, one of them will be rejected. That is important: it will not be queued, it will be rejected.
+If you start two tasks of this type, one of them will be rejected. That is important: it will not be queued, it will be rejected. 
 
+In some scenarios, this is useful. Think of a programmable device: you don't want two "program_device" tasks to be running at the same time.
+
+In other scenarios, it might be useful to guarantee this at user level (e.g., don't allow sending task of "compile_code" twice per user). In this case, you should use:
+
+.. code-block:: python
+
+    @weblab.task(unique='user')
+    def my_task():
+        # Do something with a resource
 
 At any point (including ``on_dispose``), you can see what tasks are still running:
 
