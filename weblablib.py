@@ -1208,11 +1208,12 @@ _OBJECT = object()
 class _CurrentOrExpiredUser(WebLabUser):
     def __init__(self, session_id, back, last_poll, max_date, username, username_unique,
                  exited, data, locale, full_name, experiment_name, category_name, experiment_id, 
-                 request_client_data, request_server_data):
+                 request_client_data, request_server_data, start_date):
         self._session_id = session_id
         self._back = back
         self._last_poll = last_poll
         self._max_date = max_date
+        self._start_date = start_date
         self._username = username
         self._username_unique = username_unique
         self._exited = exited
@@ -1299,6 +1300,13 @@ class _CurrentOrExpiredUser(WebLabUser):
         Information provided in the beginning of the interaction (on_start): client_data
         """
         return self._request_client_data
+
+    @property
+    def start_date(self):
+        """
+        Information provided in the beginning of the interaction (on_start): client_data
+        """
+        return self._start_date
 
     @property
     def request_server_data(self):
@@ -1394,7 +1402,7 @@ class CurrentUser(_CurrentOrExpiredUser):
                            data=self._data, locale=self._locale, full_name=self._full_name,
                            experiment_name=self._experiment_name, category_name=self._category_name,
                            experiment_id=self._experiment_id, request_client_data=self._request_client_data,
-                           request_server_data=self._request_server_data,
+                           request_server_data=self._request_server_data, start_date=self._start_date,
                            disposing_resources=True)
 
     @property
@@ -1816,7 +1824,8 @@ def _process_start_request(request_data):
                        full_name=full_name, experiment_name=experiment_name,
                        experiment_id=experiment_id, category_name=category_name,
                        request_client_data=client_initial_data,
-                       request_server_data=server_initial_data)
+                       request_server_data=server_initial_data,
+                       start_date=float(_to_timestamp(start_date)))
 
     redis_manager = _current_redis()
 
@@ -1914,6 +1923,7 @@ class _RedisManager(object):
         pipeline.hset(key, 'experiment_name', json.dumps(user.experiment_name))
         pipeline.hset(key, 'category_name', json.dumps(user.category_name))
         pipeline.hset(key, 'experiment_id', json.dumps(user.experiment_id))
+        pipeline.hset(key, 'start_date', user.start_date)
         pipeline.hset(key, 'request_client_data', json.dumps(user.request_client_data))
         pipeline.hset(key, 'request_server_data', json.dumps(user.request_server_data))
         pipeline.expire(key, expiration)
@@ -1949,13 +1959,14 @@ class _RedisManager(object):
         key = '{}:weblab:active:{}'.format(self.key_base, session_id)
         for name in ('back', 'last_poll', 'max_date', 'username', 'username-unique', 'data',
                      'exited', 'locale', 'full_name', 'experiment_name', 'category_name',
-                     'experiment_id', 'request_client_data', 'request_server_data'):
+                     'experiment_id', 'request_client_data', 'request_server_data',
+                     'start_date'):
             pipeline.hget(key, name)
 
         (back, last_poll, max_date, username,
          username_unique, data, exited, locale, full_name,
          experiment_name, category_name, experiment_id,
-         request_client_data, request_server_data) = pipeline.execute()
+         request_client_data, request_server_data, start_date) = pipeline.execute()
 
         if max_date is not None:
             return CurrentUser(session_id=session_id, back=back, last_poll=float(last_poll),
@@ -1967,6 +1978,7 @@ class _RedisManager(object):
                                category_name=json.loads(category_name),
                                request_client_data=json.loads(request_client_data),
                                request_server_data=json.loads(request_server_data),
+                               start_date=float(start_date),
                                experiment_id=json.loads(experiment_id))
 
         return self.get_expired_user(session_id)
@@ -1976,12 +1988,12 @@ class _RedisManager(object):
         key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
         for name in ('back', 'max_date', 'username', 'username-unique', 'data', 'locale',
                      'full_name', 'experiment_name', 'category_name', 'experiment_id', 'exited', 'last_poll', 
-                     'request_client_data', 'request_server_data', 'disposing_resources'):
+                     'request_client_data', 'request_server_data', 'start_date', 'disposing_resources'):
             pipeline.hget(key, name)
 
         (back, max_date, username, username_unique, data, locale,
          full_name, experiment_name, category_name, experiment_id, exited, last_poll, 
-         request_client_data, request_server_data, disposing_resources) = pipeline.execute()
+         request_client_data, request_server_data, start_date, disposing_resources) = pipeline.execute()
 
         if max_date is not None:
             return ExpiredUser(session_id=session_id, last_poll=last_poll, back=back, max_date=float(max_date), exited=exited,
@@ -1994,6 +2006,7 @@ class _RedisManager(object):
                                experiment_id=json.loads(experiment_id),
                                request_client_data=json.loads(request_client_data),
                                request_server_data=json.loads(request_server_data),
+                               start_date=float(start_date),
                                disposing_resources=json.loads(disposing_resources))
 
         return AnonymousUser()
@@ -2028,6 +2041,7 @@ class _RedisManager(object):
         pipeline.hset(key, "experiment_id", json.dumps(expired_user.experiment_id))
         pipeline.hset(key, "request_client_data", json.dumps(expired_user.request_client_data))
         pipeline.hset(key, "request_server_data", json.dumps(expired_user.request_server_data))
+        pipeline.hset(key, "start_date", expired_user.start_date)
         pipeline.hset(key, "disposing_resources", json.dumps(True))
 
         # During half an hour after being created, the user is redirected to

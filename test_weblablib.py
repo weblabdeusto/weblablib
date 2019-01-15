@@ -347,8 +347,10 @@ class BaseSessionWebLabTest(BaseWebLabTest):
                  assigned_time=300, back='http://weblab.deusto.es', language='en',
                  experiment_name='mylab', category_name='Lab experiments'):
         assigned_time = float(assigned_time)
-
-        start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
+        
+        now = datetime.datetime.now().replace(microsecond=0)
+        start_time = now.strftime("%Y-%m-%d %H:%M:%S") + '.0'
+        self._start_time_float = _to_timestamp(now)
 
         request_data = {
             'client_initial_data': {
@@ -436,6 +438,7 @@ class UserTest(BaseSessionWebLabTest):
         self.assertEquals(weblablib.weblab_user.experiment_id, 'mylab@Lab experiments')
         self.assertEquals(weblablib.weblab_user.request_client_data['in_test'], True)
         self.assertEquals(weblablib.weblab_user.request_server_data['request.username'], 'jim.smith')
+        self.assertEquals(weblablib.weblab_user.start_date, float(self._start_time_float))
 
         task_id = response.split('@@task@@')[1]
 
@@ -1486,4 +1489,7 @@ class WebLabSetupErrorsTest(unittest.TestCase):
                     pass
         finally:
             weblablib._FLASK_SOCKETIO = past_value
+
+def _to_timestamp(dtime):
+    return str(int(time.mktime(dtime.timetuple()))) + str(dtime.microsecond / 1e6)[1:]
 

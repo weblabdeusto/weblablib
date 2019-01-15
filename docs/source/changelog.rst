@@ -12,7 +12,7 @@ Link: https://docs.labsland.com/weblablib/en/0.5.0/
 General
 ^^^^^^^
 
- * ``weblab_user`` now contains also ``weblab_user.request_client_data`` and ``weblab_user.request_server_data`` which provides the data passed on the ``on_start`` method.
+ * ``weblab_user`` now contains also ``weblab_user.request_client_data`` and ``weblab_user.request_server_data`` which provides the data passed on the ``on_start`` method. Also it contains ``weblab_user.start_date`` which is the millisecond when it started according to WebLab.
 
 Tasks
 ^^^^^
