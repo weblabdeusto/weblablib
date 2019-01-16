@@ -226,7 +226,9 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
             self.assertTrue(weblablib.weblab_user.is_anonymous)
             self.assertFalse(weblablib.weblab_user.active)
             self.assertIsNone(weblablib.weblab_user.locale)
-            self.assertEquals(0, len(weblablib.weblab_user.data))
+            self.assertIsNotNone(weblablib.weblab_user.data)
+            with self.assertRaises(TypeError):
+                self.assertEquals(0, len(weblablib.weblab_user.data))
 
     def test_anonymous_on_active(self):
         with self.app.test_client() as client:
