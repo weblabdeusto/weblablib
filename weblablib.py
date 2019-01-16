@@ -223,11 +223,11 @@ class WebLab(object):
                          ``WEBLAB_CALLBACK_URL`` in configuration.
     """
 
-    def __init__(self, app=None, callback_url=None, base_url=None):
+    def __init__(self, app=None, callback_url=None, base_url=None, backend=None):
         self._app = app
         self._base_url = base_url
         self._callback_url = callback_url
-        self._backend = None
+        self._backend = backend
 
         self.poll_interval = 5
         self.cleaner_thread_interval = 5
@@ -270,7 +270,7 @@ class WebLab(object):
         for old_thread in old_threads:
             old_thread.join()
 
-    def init_app(self, app):
+    def init_app(self, app, backend=None):
         """
         Initialize the app. This method MUST be called (unless 'app' is provided in the
         constructor of WebLab; then it's called in that moment internally). Most configuration
@@ -290,6 +290,9 @@ class WebLab(object):
             # Already initialized with the same app
             return
 
+        if self._backend is None and backend:
+            self._backend = backend
+
         self._app = app
         self._app_config = pickle.dumps(app.config)
 
@@ -302,12 +305,14 @@ class WebLab(object):
         self._app.extensions['weblab'] = self
 
         #
-        # Initialize Redis Manager
+        # Initialize the backend. Defaults to _RedisManager
         #
-        redis_url = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_URL, 'redis://localhost:6379/0')
-        redis_base = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_BASE, 'lab')
-        task_expires = self._app.config.get(ConfigurationKeys.WEBLAB_TASK_EXPIRES, 3600)
-        self._backend = _RedisManager(redis_url, redis_base, task_expires, self)
+
+        if self._backend is None:
+            redis_url = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_URL, 'redis://localhost:6379/0')
+            redis_base = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_BASE, 'lab')
+            task_expires = self._app.config.get(ConfigurationKeys.WEBLAB_TASK_EXPIRES, 3600)
+            self._backend = _RedisManager(redis_url, redis_base, task_expires, self)
 
         #
         # Initialize session settings
