@@ -489,11 +489,13 @@ class WebLab(object):
             assigned_time = float(assigned_time)
 
             start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
+            start_time_timestamp = time.time()
 
             request_data = {
                 'client_initial_data': {},
                 'server_initial_data': {
                     'priority.queue.slot.start': start_time,
+                    'priority.queue.slot.start.timestamp': start_time_timestamp,
                     'priority.queue.slot.length': assigned_time,
                     'request.username': username,
                     'request.full_name': name,

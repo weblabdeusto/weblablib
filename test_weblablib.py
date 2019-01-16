@@ -347,7 +347,7 @@ class BaseSessionWebLabTest(BaseWebLabTest):
 
     def new_user(self, name='Jim Smith', username='jim.smith', username_unique='jim.smith@labsland', 
                  assigned_time=300, back='http://weblab.deusto.es', language='en',
-                 experiment_name='mylab', category_name='Lab experiments'):
+                 experiment_name='mylab', category_name='Lab experiments', use_timestamp=True):
         assigned_time = float(assigned_time)
         
         now = datetime.datetime.now().replace(microsecond=0)
@@ -370,6 +370,9 @@ class BaseSessionWebLabTest(BaseWebLabTest):
             },
             'back': back,
         }
+        if use_timestamp:
+            request_data['server_initial_data']['priority.queue.slot.start.timestamp'] = '%s' % self._start_time_float
+
         rv = self.weblab_client.post('/weblab/sessions/', data=json.dumps(request_data), headers=self.auth_headers)
         response = self.get_json(rv)
         if 'session_id' in response:
@@ -613,6 +616,15 @@ class UserTest(BaseSessionWebLabTest):
         self.assertEquals(weblablib.weblab_user.experiment_name, 'mylab')
         self.assertEquals(weblablib.weblab_user.category_name, 'Lab experiments')
         self.assertEquals(weblablib.weblab_user.experiment_id, 'mylab@Lab experiments')
+
+    def test_status_concrete_time_left_without_timestamp(self):
+        # New user, with 3 seconds
+        launch_url1, session_id1 = self.new_user(assigned_time=3, use_timestamp=False)
+        
+        should_finish = self.status()['should_finish']
+
+        # Ask in 2..3 seconds (not 5)
+        self.assertTrue(2 <= should_finish <= 3)
 
     def test_status_concrete_time_left(self):
         # New user, with 3 seconds

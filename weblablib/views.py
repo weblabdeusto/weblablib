@@ -89,10 +89,17 @@ def _process_start_request(request_data):
     server_initial_data = request_data['server_initial_data']
 
     # Parse the initial date + assigned time to know the maximum time
-    start_date_str = server_initial_data['priority.queue.slot.start']
-    start_date_str, microseconds = start_date_str.split('.')
-    difference = datetime.timedelta(microseconds=int(microseconds))
-    start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d %H:%M:%S") + difference
+    start_date_timestamp = server_initial_data.get('priority.queue.slot.start.timestamp')
+    if start_date_timestamp: # if the time is available in timestamp, use it
+        start_date = datetime.datetime.fromtimestamp(float(start_date_timestamp))
+    else:
+        # Otherwise, to keep backwards compatibility, assume that it's in the same timezone
+        # as we are
+        start_date_str = server_initial_data['priority.queue.slot.start']
+        start_date_str, microseconds = start_date_str.split('.')
+        difference = datetime.timedelta(microseconds=int(microseconds))
+        start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d %H:%M:%S") + difference
+
     slot_length = float(server_initial_data['priority.queue.slot.length'])
     max_date = start_date + datetime.timedelta(seconds=slot_length)
     locale = server_initial_data.get('request.locale')
