@@ -29,7 +29,7 @@ class WebLabUser(object):
         """str representation"""
 
 class AnonymousDataImmutableDict(dict):
-    def _method(self, *args, **kwargs):
+    def _method(self, *args, **kwargs): # pylint: disable=unused-argument, no-self-use
         raise TypeError("Anonymous user contains no valid data")
 
     __setitem__ = __getitem__ = __delitem__ = __iter__ = __len__ = _method
@@ -37,7 +37,6 @@ class AnonymousDataImmutableDict(dict):
     keys = values = get = setdefault = items = iteritems = _method
 
     pop = popitem = copy = update = clear = _method
-    
 
 @six.python_2_unicode_compatible
 class AnonymousUser(WebLabUser):
@@ -70,9 +69,9 @@ class AnonymousUser(WebLabUser):
 
 _OBJECT = object()
 
-class _CurrentOrExpiredUser(WebLabUser):
+class _CurrentOrExpiredUser(WebLabUser): # pylint: disable=abstract-method
     def __init__(self, session_id, back, last_poll, max_date, username, username_unique,
-                 exited, data, locale, full_name, experiment_name, category_name, experiment_id, 
+                 exited, data, locale, full_name, experiment_name, category_name, experiment_id,
                  request_client_data, request_server_data, start_date):
         self._session_id = session_id
         self._back = back
@@ -188,14 +187,14 @@ class _CurrentOrExpiredUser(WebLabUser):
         self.store_action(session_id, action_id, action)
         return action_id
 
-    def store_action(self, session_id, action_id, action):
+    def store_action(self, session_id, action_id, action): # pylint: disable=no-self-use
         """
         Adds a new raw action to a new or existing session_id
         """
         backend = _current_backend()
         backend.store_action(session_id, action_id, action)
 
-    def clean_actions(self, session_id):
+    def clean_actions(self, session_id): # pylint: disable=no-self-use
         """
         Remove all actions of a session_id
         """
@@ -400,4 +399,3 @@ class ExpiredUser(_CurrentOrExpiredUser):
 
     def __str__(self):
         return 'Expired user (id: {!r}): {!r} ({!r}), max date in {:.2f} seconds. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self._max_date - _current_timestamp(), self._back)
-

@@ -1,8 +1,3 @@
-#####################################################################################
-#
-#   Exceptions
-#
-
 class WebLabError(Exception):
     """Wraps all weblab exceptions"""
     pass
@@ -30,4 +25,3 @@ class AlreadyRunningError(WebLabError):
 
 class NotFoundError(WebLabError, KeyError):
     pass
-

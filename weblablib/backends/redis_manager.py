@@ -96,12 +96,12 @@ class RedisManager(object):
         pipeline = self.client.pipeline()
         key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
         for name in ('back', 'max_date', 'username', 'username-unique', 'data', 'locale',
-                     'full_name', 'experiment_name', 'category_name', 'experiment_id', 'exited', 'last_poll', 
+                     'full_name', 'experiment_name', 'category_name', 'experiment_id', 'exited', 'last_poll',
                      'request_client_data', 'request_server_data', 'start_date', 'disposing_resources'):
             pipeline.hget(key, name)
 
         (back, max_date, username, username_unique, data, locale,
-         full_name, experiment_name, category_name, experiment_id, exited, last_poll, 
+         full_name, experiment_name, category_name, experiment_id, exited, last_poll,
          request_client_data, request_server_data, start_date, disposing_resources) = pipeline.execute()
 
         if max_date is not None:
@@ -214,7 +214,7 @@ class RedisManager(object):
             # If the user was deleted in between, revert the last_poll
             self.client.delete(key)
 
-    # 
+    #
     # Storage-related Redis methods
     def store_action(self, session_id, action_id, action):
         if not isinstance(action, dict):
@@ -459,4 +459,3 @@ class RedisManager(object):
             pipeline.delete('{}:weblab:tasks:{}'.format(self.key_base, task_id))
             pipeline.delete('{}:weblab:task_ids:{}'.format(self.key_base, task_id))
         pipeline.execute()
-

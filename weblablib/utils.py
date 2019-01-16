@@ -31,4 +31,3 @@ def _to_timestamp(dtime):
 
 def _current_timestamp():
     return float(_to_timestamp(datetime.datetime.now()))
-

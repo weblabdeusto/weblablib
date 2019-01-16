@@ -99,4 +99,3 @@ class ConfigurationKeys(object):
 
     # Equivalent for WEBLAB_AUTOCLEAN_THREAD=False and WEBLAB_TASK_THREADS_PROCESS=0
     WEBLAB_NO_THREAD = 'WEBLAB_NO_THREAD'
-
