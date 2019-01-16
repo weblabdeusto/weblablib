@@ -1174,6 +1174,17 @@ class WebLabUser(object):
     def __str__(self):
         """str representation"""
 
+class AnonymousDataImmutableDict(dict):
+    def _method(self, *args, **kwargs):
+        raise TypeError("Anonymous user contains no valid data")
+
+    __setitem__ = __getitem__ = __delitem__ = __iter__ = __len__ = _method
+
+    keys = values = get = setdefault = items = iteritems = _method
+
+    pop = popitem = copy = update = clear = _method
+    
+
 @six.python_2_unicode_compatible
 class AnonymousUser(WebLabUser):
     """
@@ -1197,8 +1208,8 @@ class AnonymousUser(WebLabUser):
 
     @property
     def data(self):
-        """Data? An immutable empty dictionary"""
-        return ImmutableDict()
+        """An object that raises error if accessed as a dict"""
+        return AnonymousDataImmutableDict()
 
     def __str__(self):
         return "Anonymous user"
