@@ -129,7 +129,7 @@ class BaseWebLabTest(unittest.TestCase):
 
         with self.assertRaises(ValueError) as cm:
             # 43 characters is the length of create_token()
-            self.assertEquals(43, len(weblablib._create_token()))
+            self.assertEquals(43, len(weblablib.create_token()))
 
             # Therefore, having a task with that name length is forbidden
             # to avoid any potential issue in get_task

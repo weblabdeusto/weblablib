@@ -65,6 +65,18 @@ from flask import Blueprint, Response, jsonify, request, current_app, redirect, 
      url_for, g, session, after_this_request, render_template, Markup, \
      has_request_context, has_app_context
 
+from weblablib.exc import WebLabError, NoContextError, InvalidConfigError, \
+     WebLabNotInitializedError, TimeoutError, AlreadyRunningError, \
+     NotFoundError
+
+from weblablib.utils import create_token, _current_weblab, _current_backend, \
+     _current_session_id, _to_timestamp, _current_timestamp
+
+from weblablib.config import ConfigurationKeys
+from weblablib.users import WebLabUser, AnonymousUser, ExpiredUser, CurrentUser
+
+from weblablib.backends import RedisManager
+
 try:
     from flask_socketio import disconnect as socketio_disconnect
 except ImportError:
@@ -88,107 +100,6 @@ __all__ = ['WebLab',
 __version__ = '0.5'
 __license__ = 'GNU Affero General Public License v3 http://www.gnu.org/licenses/agpl.html'
 
-class ConfigurationKeys(object):
-    """
-    ConfigurationKeys represents all the configuration keys available in weblablib.
-    """
-
-    # # # # # # # # # #
-    #                 #
-    #  Mandatory keys #
-    #                 #
-    # # # # # # # # # #
-
-    #
-    # WebLab-Deusto needs to be authenticated in this system.
-    # So we need a pair of credentials representing the system,
-    # not the particular user coming. This is what you configured
-    # in WebLab-Deusto when you add the laboratory.
-    #
-    WEBLAB_USERNAME = 'WEBLAB_USERNAME'
-    WEBLAB_PASSWORD = 'WEBLAB_PASSWORD'
-
-    # # # # # # # # # #
-    #                 #
-    #  Optional keys  #
-    #                 #
-    # # # # # # # # # #
-
-    # the base URL is what you want to put before the /weblab/ URLs,
-    # e.g., if you want to put it in /private/weblab/ you can do that
-    # (after all, even at web server level you can configure that
-    # the weblab URLs are only available to WebLab-Deusto)
-    WEBLAB_BASE_URL = 'WEBLAB_BASE_URL'
-
-    # the callback URL must be a public URL where users will be
-    # forwarded to. For example "/lab/callback"
-    WEBLAB_CALLBACK_URL = 'WEBLAB_CALLBACK_URL'
-
-    # This is the key used in the Flask session object.
-    WEBLAB_SESSION_ID_NAME = 'WEBLAB_SESSION_ID_NAME'
-
-    # Redis URL for storing information
-    WEBLAB_REDIS_URL = 'WEBLAB_REDIS_URL'
-
-    # Redis base. If you have more than one lab in the same Redis server,
-    # you can use this variable to make it work without conflicts. By default
-    # it's lab, so all the keys will be "lab:weblab:active:session-id", for example
-    WEBLAB_REDIS_BASE = 'WEBLAB_REDIS_BASE'
-
-    # How long the results of the tasks should be stored in Redis? In seconds.
-    # By default one hour.
-    WEBLAB_TASK_EXPIRES = 'WEBLAB_TASK_EXPIRES'
-
-    # Number of seconds. If the user does not poll in that time, we consider
-    # that he will be kicked out. Defaults to 15 seconds. It can be set
-    # to -1 to disable the timeout (and therefore polling makes no sense)
-    WEBLAB_TIMEOUT = 'WEBLAB_TIMEOUT'
-
-    # Automatically poll in every method. By default it's true. So any call
-    # made to any web method will automatically poll.
-    WEBLAB_AUTOPOLL = 'WEBLAB_AUTOPOLL'
-
-    # If a user doesn't have a session, you can forward him to WebLab-Deusto.
-    # put the link to the WebLab-Deusto there
-    WEBLAB_UNAUTHORIZED_LINK = 'WEBLAB_UNAUTHORIZED_LINK'
-
-    # If a user doesn't have a session and you don't configure WEBLAB_UNAUTHORIZED_LINK
-    # then you can put 'unauthorized.html' here, and place a 'unauthorized.html' file
-    # in a 'templates' directory (see Flask documentation for details)
-    WEBLAB_UNAUTHORIZED_TEMPLATE = 'WEBLAB_UNAUTHORIZED_TEMPLATE'
-
-    # WebLab-Deusto is connecting every few seconds to the laboratory asking if the user
-    # is still alive or if he left. By default, 5 seconds. You can regulate it with this
-    # configuration variable. Note that if you establish '0', then WebLab-Deusto will
-    # not ask again and will wait until the end of the cycle.
-    WEBLAB_POLL_INTERVAL = 'WEBLAB_POLL_INTERVAL'
-
-    # Force 'http' or 'https'
-    WEBLAB_SCHEME = 'WEBLAB_SCHEME'
-
-    # Once a user is moved to inactive, the session has to expire at some point.
-    # Establish in seconds in how long (defaults to 3600, which is one hour)
-    WEBLAB_EXPIRED_USERS_TIMEOUT = 'WEBLAB_EXPIRED_USERS_TIMEOUT'
-
-    # In some rare occasions, it may happen that the dispose method is not called.
-    # For example, if the Experiment server suddenly has no internet for a temporary
-    # error, the user will not call logout, and WebLab-Deusto may fail to communicate
-    # that the user has finished, and store that it has finished internally in
-    # WebLab-Deusto. For some laboratories, it's important to be extra cautious and
-    # make sure that someone calls the _dispose method. To do so, you may call
-    # directly "flask clean_expired_users" manually (and cron it), or you may just
-    # leave this option as True, which is the default behavior, and it will create
-    # a thread that will be in a loop. If you have 10 gunicorn workers, there will
-    # be 10 threads, but it shouldn't be a problem since they're synchronized with
-    # Redis internally.
-    WEBLAB_AUTOCLEAN_THREAD = 'WEBLAB_AUTOCLEAN_THREAD'
-
-    # You can either call "flask run-tasks" or rely on the threads created
-    # for running threads.
-    WEBLAB_TASK_THREADS_PROCESS = 'WEBLAB_TASK_THREADS_PROCESS'
-
-    # Equivalent for WEBLAB_AUTOCLEAN_THREAD=False and WEBLAB_TASK_THREADS_PROCESS=0
-    WEBLAB_NO_THREAD = 'WEBLAB_NO_THREAD'
 
 #############################################################
 #
@@ -305,14 +216,14 @@ class WebLab(object):
         self._app.extensions['weblab'] = self
 
         #
-        # Initialize the backend. Defaults to _RedisManager
+        # Initialize the backend. Defaults to RedisManager
         #
 
         if self._backend is None:
             redis_url = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_URL, 'redis://localhost:6379/0')
             redis_base = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_BASE, 'lab')
             task_expires = self._app.config.get(ConfigurationKeys.WEBLAB_TASK_EXPIRES, 3600)
-            self._backend = _RedisManager(redis_url, redis_base, task_expires, self)
+            self._backend = RedisManager(redis_url, redis_base, task_expires, self)
 
         #
         # Initialize session settings
@@ -793,7 +704,7 @@ class WebLab(object):
         for session_id in self._backend.find_expired_sessions():
             try:
                 _dispose_user(session_id, waiting=False)
-            except _NotFoundError:
+            except NotFoundError:
                 pass
             except Exception:
                 traceback.print_exc()
@@ -1074,7 +985,7 @@ class WebLab(object):
                      length=43).
         :return: a unique token.
         """
-        return _create_token(size)
+        return create_token(size)
 
     def user_loader(self, func):
         """
@@ -1147,410 +1058,6 @@ class WebLab(object):
 
 _TESTING_LOOP = False
 
-##################################################################################################################
-#
-#
-#
-#         Public classes
-#
-#
-#
-
-class WebLabUser(object):
-    """
-    Abstract representation of a WebLabUser. Implementations:
-
-     * :class:`AnonymousUser`
-     * :class:`CurrentUser`
-     * :class:`ExpiredUser`
-
-    """
-    __metaclass__ = abc.ABCMeta
-
-    @abc.abstractproperty
-    def active(self):
-        """Is the user active right now or not?"""
-
-    @abc.abstractproperty
-    def is_anonymous(self):
-        """Was the user a valid user recently?"""
-
-    @abc.abstractmethod
-    def __str__(self):
-        """str representation"""
-
-class AnonymousDataImmutableDict(dict):
-    def _method(self, *args, **kwargs):
-        raise TypeError("Anonymous user contains no valid data")
-
-    __setitem__ = __getitem__ = __delitem__ = __iter__ = __len__ = _method
-
-    keys = values = get = setdefault = items = iteritems = _method
-
-    pop = popitem = copy = update = clear = _method
-    
-
-@six.python_2_unicode_compatible
-class AnonymousUser(WebLabUser):
-    """
-    Implementation of :class:`WebLabUser` representing anonymous users.
-    """
-
-    @property
-    def active(self):
-        """Is active? Always ``False``"""
-        return False
-
-    @property
-    def is_anonymous(self):
-        """Is anonymous? Always ``True``"""
-        return True
-
-    @property
-    def locale(self):
-        """Language requested by WebLab-Deusto? Always ``None``"""
-        return None
-
-    @property
-    def data(self):
-        """An object that raises error if accessed as a dict"""
-        return AnonymousDataImmutableDict()
-
-    def __str__(self):
-        return "Anonymous user"
-
-_OBJECT = object()
-
-class _CurrentOrExpiredUser(WebLabUser):
-    def __init__(self, session_id, back, last_poll, max_date, username, username_unique,
-                 exited, data, locale, full_name, experiment_name, category_name, experiment_id, 
-                 request_client_data, request_server_data, start_date):
-        self._session_id = session_id
-        self._back = back
-        self._last_poll = last_poll
-        self._max_date = max_date
-        self._start_date = start_date
-        self._username = username
-        self._username_unique = username_unique
-        self._exited = exited
-        self._data = data
-        self._locale = locale
-        self._full_name = full_name
-        self._experiment_name = experiment_name
-        self._category_name = category_name
-        self._experiment_id = experiment_id
-        self._request_client_data = request_client_data
-        self._request_server_data = request_server_data
-
-    @property
-    def experiment_name(self):
-        """Experiment name (as in WebLab-Deusto)"""
-        return self._experiment_name
-
-    @property
-    def category_name(self):
-        """Experiment category name (as in WebLab-Deusto)"""
-        return self._category_name
-
-    @property
-    def experiment_id(self):
-        """Experiment id (as in WebLab-Deusto)"""
-        return self._experiment_id
-
-    @property
-    def full_name(self):
-        """User full name"""
-        return self._full_name
-
-    @property
-    def locale(self):
-        """Language requested by the system (e.g., was the user using Moodle in Spanish?). 'es'"""
-        return self._locale
-
-    @property
-    def back(self):
-        """URL of the previous website. When the user has finished, redirect him there"""
-        return self._back
-
-    @property
-    def last_poll(self):
-        """Last time the user called poll() (can be done by an automated process)"""
-        return self._last_poll
-
-    @property
-    def session_id(self):
-        """Session identifying the current user"""
-        return self._session_id
-
-    @property
-    def max_date(self):
-        """When should the user finish"""
-        return self._max_date
-
-    @property
-    def username(self):
-        """
-        Username of the user. Note: this is short, but not unique across institutions.
-        There could be a ``john`` in ``institutionA`` and another ``john`` in ``institutionB``
-        """
-        return self._username
-
-    @property
-    def username_unique(self):
-        """
-        Unique username across institutions. It's ``john@institutionA`` (which is
-        different to ``john@institutionB``)
-        """
-        return self._username_unique
-
-    @property
-    def exited(self):
-        """
-        Did the user call :func:`logout`?
-        """
-        return self._exited
-
-    @property
-    def request_client_data(self):
-        """
-        Information provided in the beginning of the interaction (on_start): client_data
-        """
-        return ImmutableDict(self._request_client_data or {})
-
-    @property
-    def request_server_data(self):
-        """
-        Information provided in the beginning of the interaction (on_start): server_data
-        """
-        return ImmutableDict(self._request_server_data or {})
-
-    @property
-    def start_date(self):
-        """
-        Information provided in the beginning of the interaction (on_start): client_data
-        """
-        return self._start_date
-
-    def add_action(self, session_id, action):
-        """
-        Adds a new raw action to a session_id, returning the action_id
-        """
-        action_id = create_token()
-        self.store_action(session_id, action_id, action)
-        return action_id
-
-    def store_action(self, session_id, action_id, action):
-        """
-        Adds a new raw action to a new or existing session_id
-        """
-        backend = _current_backend()
-        backend.store_action(session_id, action_id, action)
-
-    def clean_actions(self, session_id):
-        """
-        Remove all actions of a session_id
-        """
-        backend = _current_backend()
-        backend.clean_actions(session_id)
-
-
-@six.python_2_unicode_compatible
-class CurrentUser(_CurrentOrExpiredUser):
-    """
-    This class is a :class:`WebLabUser` representing a user which is still actively using a
-    laboratory. If the session expires, it will become a :class:`ExpiredUser`.
-    """
-
-    @property
-    def data(self):
-        """
-        User data. By default an empty dictionary.
-        You can access to it and modify it across processes.
-        See also :meth:`CurrentUser.update_data`.
-        """
-        return self._data
-
-    @data.setter
-    def data(self, data):
-        backend = _current_backend()
-        backend.update_data(self._session_id, data)
-        self._data = data
-
-    def update_data(self, new_data=_OBJECT):
-        """
-        Updates data::
-
-            task.data['foo'] = 'bar'
-            task.update_data()
-
-        or::
-
-            task.update_data({'foo': 'bar'})
-        """
-        if new_data == _OBJECT:
-            new_data = self._data
-
-        backend = _current_backend()
-        backend.update_data(self._session_id, new_data)
-        self._data = new_data
-
-    @property
-    def time_without_polling(self):
-        """
-        Seconds without polling
-        """
-        return _current_timestamp() - self.last_poll
-
-    @property
-    def time_left(self):
-        """
-        Seconds left (0 if time passed)
-        """
-        return max(0, self.max_date - _current_timestamp())
-
-    def to_expired_user(self):
-        """
-        Create a ExpiredUser based on the data of the user
-        """
-        return ExpiredUser(session_id=self._session_id, back=self._back, max_date=self._max_date,
-                           last_poll=self._last_poll, exited=self._exited,
-                           username=self._username, username_unique=self._username_unique,
-                           data=self._data, locale=self._locale, full_name=self._full_name,
-                           experiment_name=self._experiment_name, category_name=self._category_name,
-                           experiment_id=self._experiment_id, request_client_data=self._request_client_data,
-                           request_server_data=self._request_server_data, start_date=self._start_date,
-                           disposing_resources=True)
-
-    @property
-    def user(self):
-        """
-        Load a related user from a database or similar. You might want to keep information about
-        the current user and use this information across sessions, depending on your laboratory.
-        Examples of this could be logs, or shared resources (e.g., storing the last actions of
-        the user for the next time they log in). So as to load the user from the database, you
-        can use :meth:`WebLab.user_loader` to define a user loader, and use this property to access
-        later to it.
-
-        For example, using `Flask-SQLAlchemy <http://flask-sqlalchemy.pocoo.org/>`_::
-
-           from mylab.models import LaboratoryUser
-
-           @weblab.on_start
-           def start(client_data, server_data):
-               # ...
-               user = LaboratoryUser.query.filter(identifier.username_unique).first()
-               if user is None:
-                   # Make sure the user exists in the database
-                   user_folder = create_user_folder()
-                   user = LaboratoryUser(username=weblab_user.username,
-                                     identifier=username_unique,
-                                     user_folder=user_folder)
-                   db.session.add(user)
-                   db.session.commit()
-
-
-           @weblab.user_loader
-           def loader(username_unique):
-               return LaboratoryUser.query.filter(identifier=username_unique).first()
-
-           # And then later:
-
-           @app.route('/lab')
-           @requires_active
-           def home():
-               user_db = weblab_user.user
-               open(os.path.join(user_db.user_folder, 'myfile.txt')).read()
-
-           @app.route('/files')
-           @requires_active
-           def files():
-               user_folder = weblab_user.user.user_folder
-               # ...
-
-        """
-        user_loader = _current_weblab()._user_loader
-        if user_loader is None:
-            return None
-
-        try:
-            user = user_loader(self.username_unique)
-        except:
-            raise
-        else:
-            # Maybe in the future we should cache results so
-            # no every weblab_user.user becomes a call to
-            # the database? The main issue is with tasks or
-            # long-standing processes
-            return user
-
-    @property
-    def active(self):
-        """Is the user active and has not called :func:`logout`?"""
-        return not self._exited
-
-    @property
-    def is_anonymous(self):
-        """Is the user anonymous? ``False``"""
-        return False
-
-    def __str__(self):
-        return 'Current user (id: {!r}): {!r} ({!r}), last poll: {:.2f} seconds ago. Max date in {:.2f} seconds. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self.time_without_polling, self._max_date - _current_timestamp(), self._back)
-
-@six.python_2_unicode_compatible
-class ExpiredUser(_CurrentOrExpiredUser):
-    """
-    This class is a :class:`WebLabUser` representing a user which has been kicked out already.
-    Typically this ExpiredUser is kept in the backend for around an hour (it depends on
-    ``WEBLAB_EXPIRED_USERS_TIMEOUT`` setting).
-
-    Most of the fields are same as in :class:`CurrentUser`.
-    """
-    def __init__(self, *args, **kwargs):
-        disposing_resources = kwargs.pop('disposing_resources', False)
-        super(ExpiredUser, self).__init__(*args, **kwargs)
-        self.disposing_resources = disposing_resources
-
-    @property
-    def data(self):
-        """
-        User data. By default an empty dictionary.
-        You can access to it and modify it across processes.
-
-        Do not change this data in :class:`ExpiredUser`.
-        """
-        return self._data
-
-    @data.setter
-    def data(self, value):
-        raise NotImplementedError("You can't change data on an ExpiredUser")
-
-    def update_data(self, value=None):
-        """Update data. Not implemented in :class:`ExpiredUser` (expect an error)"""
-        raise NotImplementedError("You can't change data on an ExpiredUser")
-
-    @property
-    def time_left(self):
-        """
-        Seconds left (always 0 in this case)
-        """
-        return 0
-
-    @property
-    def active(self):
-        """
-        Is it an active user? (``False``)
-        """
-        return False
-
-    @property
-    def is_anonymous(self):
-        """
-        Is it an anonymous user? (``False``)
-        """
-        return False
-
-    def __str__(self):
-        return 'Expired user (id: {!r}): {!r} ({!r}), max date in {:.2f} seconds. Redirecting to {!r}'.format(self._session_id, self._username, self._username_unique, self._max_date - _current_timestamp(), self._back)
 
 ##################################################################################################################
 #
@@ -1829,7 +1336,7 @@ def _process_start_request(request_data):
     experiment_id = '{}@{}'.format(experiment_name, category_name)
 
     # Create a global session
-    session_id = _create_token()
+    session_id = create_token()
 
     # Prepare adding this to backend
     user = CurrentUser(session_id=session_id, back=request_data['back'],
@@ -1903,504 +1410,11 @@ def _dispose_experiment(session_id):
 
     try:
         _dispose_user(session_id, waiting=True)
-    except _NotFoundError:
+    except NotFoundError:
         return jsonify(message="Not found")
 
     return jsonify(message="Deleted")
 
-
-######################################################################################
-#
-#     Redis Management
-#
-
-class _RedisManager(object):
-
-    def __init__(self, redis_url, key_base, task_expires, weblab):
-        self.client = redis.StrictRedis.from_url(redis_url, decode_responses=True)
-        self.weblab = weblab
-        self.key_base = key_base
-        self.task_expires = task_expires
-
-    def add_user(self, session_id, user, expiration):
-        key = '{}:weblab:active:{}'.format(self.key_base, session_id)
-
-        pipeline = self.client.pipeline()
-        pipeline.hset(key, 'max_date', user.max_date)
-        pipeline.hset(key, 'last_poll', user.last_poll)
-        pipeline.hset(key, 'username', user.username)
-        pipeline.hset(key, 'username-unique', user.username_unique)
-        pipeline.hset(key, 'data', json.dumps(user.data))
-        pipeline.hset(key, 'back', user.back)
-        pipeline.hset(key, 'exited', json.dumps(user.exited))
-        pipeline.hset(key, 'locale', json.dumps(user.locale))
-        pipeline.hset(key, 'full_name', json.dumps(user.full_name))
-        pipeline.hset(key, 'experiment_name', json.dumps(user.experiment_name))
-        pipeline.hset(key, 'category_name', json.dumps(user.category_name))
-        pipeline.hset(key, 'experiment_id', json.dumps(user.experiment_id))
-        pipeline.hset(key, 'start_date', user.start_date)
-        pipeline.hset(key, 'request_client_data', json.dumps(user.request_client_data))
-        pipeline.hset(key, 'request_server_data', json.dumps(user.request_server_data))
-        pipeline.expire(key, expiration)
-        pipeline.set('{}:weblab:sessions:{}'.format(self.key_base, session_id), time.time())
-        pipeline.expire('{}:weblab:sessions:{}'.format(self.key_base, session_id), expiration + 300)
-        pipeline.execute()
-
-    def is_session_deleted(self, session_id):
-        return self.client.get('{}:weblab:sessions:{}'.format(self.key_base, session_id)) is None
-
-    def report_session_deleted(self, session_id):
-        self.client.delete('{}:weblab:sessions:{}'.format(self.key_base, session_id))
-
-    def update_data(self, session_id, data):
-        key_active = '{}:weblab:active:{}'.format(self.key_base, session_id)
-        key_inactive = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
-
-        pipeline = self.client.pipeline()
-        pipeline.hget(key_active, 'max_date')
-        pipeline.hget(key_inactive, 'max_date')
-        pipeline.hset(key_active, 'data', json.dumps(data))
-        pipeline.hset(key_inactive, 'data', json.dumps(data))
-        max_date_active, max_date_inactive, _, _ = pipeline.execute()
-
-        if max_date_active is None: # Object had been removed
-            self.client.delete(key_active)
-
-        if max_date_inactive is None: # Object had been removed
-            self.client.delete(key_inactive)
-
-    def get_user(self, session_id):
-        pipeline = self.client.pipeline()
-        key = '{}:weblab:active:{}'.format(self.key_base, session_id)
-        for name in ('back', 'last_poll', 'max_date', 'username', 'username-unique', 'data',
-                     'exited', 'locale', 'full_name', 'experiment_name', 'category_name',
-                     'experiment_id', 'request_client_data', 'request_server_data',
-                     'start_date'):
-            pipeline.hget(key, name)
-
-        (back, last_poll, max_date, username,
-         username_unique, data, exited, locale, full_name,
-         experiment_name, category_name, experiment_id,
-         request_client_data, request_server_data, start_date) = pipeline.execute()
-
-        if max_date is not None:
-            return CurrentUser(session_id=session_id, back=back, last_poll=float(last_poll),
-                               max_date=float(max_date), username=username,
-                               username_unique=username_unique,
-                               data=json.loads(data), exited=json.loads(exited),
-                               locale=json.loads(locale), full_name=json.loads(full_name),
-                               experiment_name=json.loads(experiment_name),
-                               category_name=json.loads(category_name),
-                               request_client_data=json.loads(request_client_data),
-                               request_server_data=json.loads(request_server_data),
-                               start_date=float(start_date),
-                               experiment_id=json.loads(experiment_id))
-
-        return self.get_expired_user(session_id)
-
-    def get_expired_user(self, session_id):
-        pipeline = self.client.pipeline()
-        key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
-        for name in ('back', 'max_date', 'username', 'username-unique', 'data', 'locale',
-                     'full_name', 'experiment_name', 'category_name', 'experiment_id', 'exited', 'last_poll', 
-                     'request_client_data', 'request_server_data', 'start_date', 'disposing_resources'):
-            pipeline.hget(key, name)
-
-        (back, max_date, username, username_unique, data, locale,
-         full_name, experiment_name, category_name, experiment_id, exited, last_poll, 
-         request_client_data, request_server_data, start_date, disposing_resources) = pipeline.execute()
-
-        if max_date is not None:
-            return ExpiredUser(session_id=session_id, last_poll=last_poll, back=back, max_date=float(max_date), exited=exited,
-                               username=username, username_unique=username_unique,
-                               data=json.loads(data),
-                               locale=json.loads(locale),
-                               full_name=json.loads(full_name),
-                               experiment_name=json.loads(experiment_name),
-                               category_name=json.loads(category_name),
-                               experiment_id=json.loads(experiment_id),
-                               request_client_data=json.loads(request_client_data),
-                               request_server_data=json.loads(request_server_data),
-                               start_date=float(start_date),
-                               disposing_resources=json.loads(disposing_resources))
-
-        return AnonymousUser()
-
-    def _tests_delete_user(self, session_id):
-        "Only for testing"
-        self.client.delete('{}:weblab:active:{}'.format(self.key_base, session_id))
-        self.client.delete('{}:weblab:inactive:{}'.format(self.key_base, session_id))
-
-    def delete_user(self, session_id, expired_user):
-        if self.client.hget('{}:weblab:active:{}'.format(self.key_base, session_id), "max_date") is None:
-            return False
-
-        #
-        # If two processes at the same time call delete() and establish the same second,
-        # it's not a big deal (as long as only one calls _on_delete later).
-        #
-        pipeline = self.client.pipeline()
-        pipeline.delete("{}:weblab:active:{}".format(self.key_base, session_id))
-
-        key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
-
-        pipeline.hset(key, "back", expired_user.back)
-        pipeline.hset(key, "max_date", expired_user.max_date)
-        pipeline.hset(key, "username", expired_user.username)
-        pipeline.hset(key, "username-unique", expired_user.username_unique)
-        pipeline.hset(key, "data", json.dumps(expired_user.data))
-        pipeline.hset(key, "locale", json.dumps(expired_user.locale))
-        pipeline.hset(key, "full_name", json.dumps(expired_user.full_name))
-        pipeline.hset(key, "experiment_name", json.dumps(expired_user.experiment_name))
-        pipeline.hset(key, "category_name", json.dumps(expired_user.category_name))
-        pipeline.hset(key, "experiment_id", json.dumps(expired_user.experiment_id))
-        pipeline.hset(key, "request_client_data", json.dumps(expired_user.request_client_data))
-        pipeline.hset(key, "request_server_data", json.dumps(expired_user.request_server_data))
-        pipeline.hset(key, "start_date", expired_user.start_date)
-        pipeline.hset(key, "disposing_resources", json.dumps(True))
-
-        # During half an hour after being created, the user is redirected to
-        # the original URL. After that, every record of the user has been deleted
-        pipeline.expire("{}:weblab:inactive:{}".format(self.key_base, session_id), current_app.config.get(ConfigurationKeys.WEBLAB_EXPIRED_USERS_TIMEOUT, 3600))
-        results = pipeline.execute()
-
-        return results[0] != 0 # If redis returns 0 on delete() it means that it was not deleted
-
-    def finished_dispose(self, session_id):
-        key = '{}:weblab:inactive:{}'.format(self.key_base, session_id)
-        if self.client.hset(key, "disposing_resources", json.dumps(False)) == 1:
-            self.client.delete(key)
-
-    def force_exit(self, session_id):
-        """
-        If the user logs out, or closes the window, we have to report
-        WebLab-Deusto.
-        """
-        pipeline = self.client.pipeline()
-        pipeline.hget("{}:weblab:active:{}".format(self.key_base, session_id), "max_date")
-        pipeline.hset("{}:weblab:active:{}".format(self.key_base, session_id), "exited", "true")
-        max_date, _ = pipeline.execute()
-        if max_date is None:
-            # If max_date is None it means that it had been previously deleted
-            self.client.delete("{}:weblab:active:{}".format(self.key_base, session_id))
-
-    def find_expired_sessions(self):
-        expired_sessions = []
-
-        for active_key in self.client.keys('{}:weblab:active:*'.format(self.key_base)):
-            session_id = active_key[len('{}:weblab:active:'.format(self.key_base)):]
-            user = self.get_user(session_id)
-            if isinstance(user, CurrentUser): # Double check: he might be deleted in the meanwhile
-                # We don't use 'active', since active takes into account 'exited'
-                if user.time_left <= 0:
-                    expired_sessions.append(session_id)
-
-                elif user.time_without_polling >= self.weblab.timeout:
-                    expired_sessions.append(session_id)
-
-                elif user.exited:
-                    expired_sessions.append(session_id)
-
-        return expired_sessions
-
-    def session_exists(self, session_id):
-        user = self.get_user(session_id)
-        return not user.is_anonymous
-
-    def poll(self, session_id):
-        key = '{}:weblab:active:{}'.format(self.key_base, session_id)
-
-        last_poll = _current_timestamp()
-        pipeline = self.client.pipeline()
-        pipeline.hget(key, "max_date")
-        pipeline.hset(key, "last_poll", last_poll)
-        max_date, _ = pipeline.execute()
-
-        if max_date is None:
-            # If the user was deleted in between, revert the last_poll
-            self.client.delete(key)
-
-    # 
-    # Storage-related Redis methods
-    def store_action(self, session_id, action_id, action):
-        if not isinstance(action, dict):
-            raise ValueError("Actions must be dictionaries of data")
-
-        raw_action = {
-            'ts': time.time(),
-        }
-        raw_action.update(action)
-
-        key = '{}:weblab:storage:{}'.format(self.key_base, session_id)
-
-        pipeline = self.client.pipeline()
-        pipeline.hset(key, action_id, json.dumps(raw_action))
-        pipeline.expire(key, 3600 * 24) # Store in memory for maximum 24 hours
-        pipeline.execute()
-
-    def clean_actions(self, session_id):
-        """
-        Deletes all the stored actions for a session_id. Frees memory, so
-        WebLab-Deusto should call it after obtaining the data.
-        """
-        key = '{}:weblab:storage:{}'.format(self.key_base, session_id)
-        self.client.delete(key)
-
-    #
-    # Task-related Redis methods
-    #
-    def new_task(self, session_id, name, args, kwargs):
-        """
-        Get a new function, args and kwargs, and return the task_id.
-        """
-        task_id = _create_token()
-        while True:
-            pipeline = self.client.pipeline()
-            pipeline.set('{}:weblab:task_ids:{}'.format(self.key_base, task_id), task_id)
-            pipeline.expire('{}:weblab:task_ids:{}'.format(self.key_base, task_id), self.task_expires)
-            results = pipeline.execute()
-
-            if results[0]:
-                # Ensure it's unique
-                break
-
-            # Otherwise try with another
-            task_id = _create_token()
-
-        pipeline = self.client.pipeline()
-        pipeline.sadd('{}:weblab:{}:tasks'.format(self.key_base, session_id), task_id)
-        pipeline.expire('{}:weblab:{}:tasks'.format(self.key_base, session_id), self.task_expires)
-        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'name', name)
-        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'session_id', session_id)
-        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'args', json.dumps(args))
-        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'kwargs', json.dumps(kwargs))
-        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'finished', 'false')
-        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'error', 'null')
-        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'result', 'null')
-        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'data', json.dumps({}))
-        pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'stopping', json.dumps(False))
-        # Missing (normal): running. When created, we know if it's a new key and therefore that
-        # no other thread is processing it.
-        pipeline.execute()
-        return task_id
-
-    def clean_lock_global_unique_task(self, task_name):
-        self.unlock_global_unique_task(task_name)
-
-    def clean_lock_user_unique_task(self, task_name):
-        self.unlock_user_unique_task(task_name)
-
-    def lock_global_unique_task(self, task_name):
-        key = '{}:weblab:global-unique-tasks:{}'.format(self.key_base, task_name)
-        pipeline = self.client.pipeline()
-        pipeline.hset(key, 'running', 1)
-        pipeline.expire(key, 7200) # 2-hour task lock is way too long in the context of remote labs
-        established, _ = pipeline.execute()
-        return established == 1
-
-    def lock_user_unique_task(self, task_name, session_id):
-        key = '{}:weblab:user-unique-tasks:{}:{}'.format(self.key_base, task_name, session_id)
-        pipeline = self.client.pipeline()
-        pipeline.hset(key, 'running', 1)
-        pipeline.expire(key, 7200) # 2-hour task lock is way too long in the context of remote labs
-        established, _ = pipeline.execute()
-        return established == 1
-
-    def unlock_global_unique_task(self, task_name):
-        self.client.delete('{}:weblab:global-unique-tasks:{}'.format(self.key_base, task_name))
-
-    def unlock_user_unique_task(self, task_name, session_id):
-        self.client.delete('{}:weblab:user-unique-tasks:{}:{}'.format(self.key_base, task_name, session_id))
-
-    def get_tasks_not_started(self):
-        task_ids = [key[len('{}:weblab:task_ids:'.format(self.key_base)):]
-                    for key in self.client.keys('{}:weblab:task_ids:*'.format(self.key_base))]
-
-        pipeline = self.client.pipeline()
-        for task_id in task_ids:
-            pipeline.hget('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'running')
-
-        results = pipeline.execute()
-
-        not_started = []
-
-        for task_id, running in zip(task_ids, results):
-            if not running:
-                not_started.append(task_id)
-
-        return not_started
-
-    def start_task(self, task_id):
-        """
-        Mark a task as running.
-
-        If it exists, return a dictionary with name, args, kwargs and session_id
-
-        If it doesn't exist or is taken by other thread, return None
-        """
-        key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
-
-        pipeline = self.client.pipeline()
-        pipeline.hset(key, 'running', '1')
-        pipeline.hget(key, 'name')
-        pipeline.hget(key, 'args')
-        pipeline.hget(key, 'kwargs')
-        pipeline.hget(key, 'session_id')
-
-        running, name, args, kwargs, session_id = pipeline.execute()
-        if not running:
-            # other thread did the hset first
-            return None
-
-        # If runnning == 1...
-        if name is None:
-            # The object was deleted before
-            self.client.delete(key)
-            return None
-
-        return {
-            'name': name,
-            'args': json.loads(args),
-            'kwargs': json.loads(kwargs),
-            'session_id': session_id,
-        }
-
-    def finish_task(self, task_id, result=None, error=None):
-        if error and result:
-            raise ValueError("You can't provide result and error: either one or the other")
-        key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
-
-        pipeline = self.client.pipeline()
-        pipeline.hget(key, 'session_id')
-        pipeline.hset(key, 'finished', 'true')
-        pipeline.hset(key, 'result', json.dumps(result))
-        pipeline.hset(key, 'error', json.dumps(error))
-        results = pipeline.execute()
-        if not results[0]:
-            # If it had been deleted... delete it
-            self.client.delete(key)
-
-    def update_task_data(self, task_id, new_data):
-        key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
-        pipeline = self.client.pipeline()
-        pipeline.hget(key, 'name')
-        pipeline.hset(key, 'data', json.dumps(new_data))
-        name, _ = pipeline.execute()
-        if name is None:
-            # Deleted in the meanwhile
-            self.client.delete(key)
-
-    def request_stop_task(self, task_id):
-        key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
-        pipeline = self.client.pipeline()
-        pipeline.hget(key, 'name')
-        pipeline.hset(key, 'stopping', json.dumps(True))
-        name, _ = pipeline.execute()
-        if name is None:
-            # Deleted in the meanwhile
-            self.client.delete(key)
-
-    def get_task(self, task_id):
-        key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
-
-        pipeline = self.client.pipeline()
-        pipeline.hget(key, 'session_id')
-        pipeline.hget(key, 'finished')
-        pipeline.hget(key, 'error')
-        pipeline.hget(key, 'result')
-        pipeline.hget(key, 'running')
-        pipeline.hget(key, 'name')
-        pipeline.hget(key, 'data')
-        pipeline.hget(key, 'stopping')
-        session_id, finished, error_str, result_str, running, name, data_str, stopping_str = pipeline.execute()
-
-        if session_id is None:
-            return None
-
-        error = json.loads(error_str)
-        result = json.loads(result_str)
-        data = json.loads(data_str)
-        stopping = json.loads(stopping_str)
-
-        if not running:
-            status = 'submitted'
-        elif finished == 'true':
-            if error:
-                status = 'failed'
-            else:
-                status = 'done'
-        else:
-            status = 'running'
-
-        return {
-            'task_id': task_id,
-            'result': result,
-            'error': error,
-            'status': status,
-            'session_id': session_id,
-            'name': name,
-            'data': data,
-            'stopping': stopping,
-        }
-
-    def get_all_tasks(self, session_id):
-        return self.client.smembers('{}:weblab:{}:tasks'.format(self.key_base, session_id))
-
-    def get_unfinished_tasks(self, session_id):
-        task_ids = self.client.smembers('{}:weblab:{}:tasks'.format(self.key_base, session_id))
-        pipeline = self.client.pipeline()
-        for task_id in task_ids:
-            pipeline.hget('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'finished')
-
-        pending_task_ids = []
-        for task_id, finished in zip(task_ids, pipeline.execute()):
-            if finished == 'false': # If finished or failed: true; if expired: None
-                pending_task_ids.append(task_id)
-
-        return pending_task_ids
-
-    def clean_session_tasks(self, session_id):
-        task_ids = self.client.smembers('{}:weblab:{}:tasks'.format(self.key_base, session_id))
-
-        pipeline = self.client.pipeline()
-        pipeline.delete('{}:weblab:{}:tasks'.format(self.key_base, session_id))
-        for task_id in task_ids:
-            pipeline.delete('{}:weblab:tasks:{}'.format(self.key_base, task_id))
-            pipeline.delete('{}:weblab:task_ids:{}'.format(self.key_base, task_id))
-        pipeline.execute()
-
-#####################################################################################
-#
-#   Exceptions
-#
-
-class WebLabError(Exception):
-    """Wraps all weblab exceptions"""
-    pass
-
-class NoContextError(WebLabError):
-    """Wraps the fact that it is attempting to call an object like
-    session outside the proper scope."""
-    pass
-
-class InvalidConfigError(WebLabError, ValueError):
-    """Invalid configuration"""
-    pass
-
-class WebLabNotInitializedError(WebLabError):
-    """Requesting a WebLab object when ``weblab.init_app`` has not been called."""
-    pass
-
-class TimeoutError(WebLabError):
-    """When joining (:meth:`WebLabTask.join`) a task with a timeout, this error may arise"""
-    pass
-
-class AlreadyRunningError(WebLabError):
-    """When creating a task (:meth:`WebLab.task`) with ``unique='global'`` or ``unique='user'``, the second thread/process attempting to run the same method will obtain this error"""
-    pass
-
-class _NotFoundError(WebLabError, KeyError):
-    pass
 
 ######################################################################################
 #
@@ -2413,7 +1427,7 @@ class _TaskWrapper(object):
         self._func = func
         self._unique = unique
         self._name = func.__name__
-        if len(self._name) == len(_create_token()):
+        if len(self._name) == len(create_token()):
             raise ValueError("The function '{}' has an invalid name: the number of characters "
                              "must be higher or  lower than this. Otherwise get_task(task_id) "
                              "could potentially fail".format(func.__name__))
@@ -2787,7 +1801,7 @@ class _TaskRunner(threading.Thread):
             try:
                 with self.app.app_context():
                     self.weblab.run_tasks()
-            except ConnectionError:
+            except redis.ConnectionError:
                 # In the case of a ConnectionError, let's wait a bit more to see if
                 # it happens again. It can be that we are just restarting the server
                 # and Redis died before, or a Redis upgrade or so.
@@ -2809,33 +1823,6 @@ class _TaskRunner(threading.Thread):
 #     Auxiliar private functions
 #
 #
-
-def _current_weblab():
-    if 'weblab' not in current_app.extensions:
-        raise WebLabNotInitializedError("App not initialized with weblab.init_app()")
-    return current_app.extensions['weblab']
-
-def _current_backend():
-    return _current_weblab()._backend
-
-def _current_session_id():
-    return _current_weblab()._session_id()
-
-def _to_timestamp(dtime):
-    return str(int(time.mktime(dtime.timetuple()))) + str(dtime.microsecond / 1e6)[1:]
-
-def _current_timestamp():
-    return float(_to_timestamp(datetime.datetime.now()))
-
-def _create_token(size=None):
-    if size is None:
-        size = 32
-    tok = os.urandom(size)
-    safe_token = base64.urlsafe_b64encode(tok).strip().replace(b'=', b'').replace(b'-', b'_')
-    safe_token = safe_token.decode('utf8')
-    return safe_token
-
-create_token = _create_token
 
 def _status_time(session_id):
     weblab = _current_weblab()
@@ -2884,7 +1871,7 @@ def _dispose_user(session_id, waiting):
     backend = _current_backend()
     user = backend.get_user(session_id)
     if user.is_anonymous:
-        raise _NotFoundError()
+        raise NotFoundError()
 
     if isinstance(user, CurrentUser):
         current_expired_user = user.to_expired_user()
