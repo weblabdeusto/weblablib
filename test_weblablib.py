@@ -1066,17 +1066,18 @@ class StartErrorTest(BaseSessionWebLabTest):
         raise Exception("Testing error in the start method")
 
     def test_task_fail(self):
-        old_dispose_user = weblablib._dispose_user
+        import weblablib.views as weblablib_views
+        old_dispose_user = weblablib_views.dispose_user
         def new_dispose_user(*args, **kwargs):
             raise Exception("weird error")
 
-        weblablib._dispose_user = new_dispose_user
+        weblablib_views.dispose_user = new_dispose_user
         try:
             with self.assertRaises(TestNewUserError):
                 with StdWrap():
                     self.new_user()
         finally:
-            weblablib._dispose_user = old_dispose_user
+            weblablib_views.dispose_user = old_dispose_user
 
 class BaseCLITest(BaseSessionWebLabTest):
 

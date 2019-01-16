@@ -73,11 +73,12 @@ from weblablib.utils import create_token, _current_weblab, _current_backend, \
      _current_session_id, _to_timestamp, _current_timestamp
 
 from weblablib.config import ConfigurationKeys
-from weblablib.users import WebLabUser, AnonymousUser, ExpiredUser, CurrentUser
-
+from weblablib.users import WebLabUser, AnonymousUser, ExpiredUser, CurrentUser, \
+     get_weblab_user, weblab_user, socket_weblab_user, _set_weblab_user_cache
 from weblablib.backends import RedisManager
-
 from weblablib.tasks import WebLabTask, _TaskRunner, _TaskWrapper, current_task, current_task_stopping
+from weblablib.ops import status_time, update_weblab_user_data, dispose_user
+from weblablib.views import weblab_blueprint
 
 try:
     from flask_socketio import disconnect as socketio_disconnect
@@ -250,7 +251,7 @@ class WebLab(object):
         else:
             url = '/weblab'
 
-        self._app.register_blueprint(_weblab_blueprint, url_prefix=url)
+        self._app.register_blueprint(weblab_blueprint, url_prefix=url)
 
         #
         # Add a callback URL
@@ -301,7 +302,7 @@ class WebLab(object):
             logout()
             return jsonify(success=True)
 
-        self._app.after_request(_update_weblab_user_data)
+        self._app.after_request(update_weblab_user_data)
 
         #
         # Add autopoll
@@ -543,9 +544,9 @@ class WebLab(object):
                 print("Session not found. Did you call 'flask weblab fake new' first?")
                 return
             session_id = open('.fake_weblab_user_session_id').read()
-            status_time = _status_time(session_id)
+            current_status_time = status_time(session_id)
             print(self._backend.get_user(session_id))
-            print("Should finish: {}".format(status_time))
+            print("Should finish: {}".format(current_status_time))
 
         @fake.command('dispose')
         def fake_dispose():
@@ -705,7 +706,7 @@ class WebLab(object):
         """
         for session_id in self._backend.find_expired_sessions():
             try:
-                _dispose_user(session_id, waiting=False)
+                dispose_user(session_id, waiting=False)
             except NotFoundError:
                 pass
             except Exception:
@@ -1097,45 +1098,6 @@ def poll():
         g.poll_requested = True
 
 
-def get_weblab_user(cached=True):
-    """
-    Get the current user. If ``cached=True`` it will store it and return the same each time.
-    If you need to get always a different one get it with ``cached=False``. In long tasks, for
-    example, it's normal to call it with ``cached=False`` so it gets updated with whatever
-    information comes from other threads.
-
-    Two shortcuts exist to this function:
-     * :data:`weblab_user`: it is equivalent to ``get_weblab_user(cached=True)``
-     * :data:`socket_weblab_user`: it is equivalent to ``get_weblab_user(cached=False)``
-
-    Given that the function always returns a :class:`CurrentUser` or :class:`ExpiredUser` or :class:`AnonymousUser`, it's safe to do things like::
-
-       if not weblab_user.anonymous:
-           print(weblab_user.username)
-           print(weblab_user.username_unique)
-
-    :param cached: if this method is called twice in the same thread, it will return the same object.
-    """
-    if cached and hasattr(g, 'weblab_user'):
-        return g.weblab_user
-
-    # Cached: then use Redis
-    session_id = _current_session_id()
-    if session_id is None:
-        return _set_weblab_user_cache(AnonymousUser())
-
-    user = _current_backend().get_user(session_id)
-    # Store it for next requests in the same call
-    return _set_weblab_user_cache(user)
-
-def _set_weblab_user_cache(user):
-    g.weblab_user = user
-    return user
-
-weblab_user = LocalProxy(get_weblab_user) # pylint: disable=invalid-name
-
-socket_weblab_user = LocalProxy(lambda: get_weblab_user(cached=False)) # pylint: disable=invalid-name
-
 def requires_login(func):
     """
     Decorator. Requires the user to have logged in. For example, the user might have finished
@@ -1224,284 +1186,6 @@ def logout():
     session_id = _current_session_id()
     if session_id:
         _current_backend().force_exit(session_id)
-
-
-##################################################################################################################
-#
-#
-#
-#         WebLab blueprint and web methods
-#
-#
-#
-
-_weblab_blueprint = Blueprint("weblab", __name__) # pylint: disable=invalid-name
-
-
-
-@_weblab_blueprint.before_request
-def _require_http_credentials():
-    """
-    All methods coming from WebLab-Deusto must be authenticated (except for /api). Here, it is used the
-    WEBLAB_USERNAME and WEBLAB_PASSWORD configuration variables, which are used by WebLab-Deusto.
-    Take into account that this username and password authenticate the WebLab-Deusto system, not the user.
-    For example, a WebLab-Deusto in institution A might have 'institutionA' as WEBLAB_USERNAME and some
-    randomly generated password as WEBLAB_PASSWORD.
-    """
-    # Don't require credentials in /api
-    if request.url.endswith('/api'):
-        return None
-
-    auth = request.authorization
-    if auth:
-        provided_username = auth.username
-        provided_password = auth.password
-    else:
-        provided_username = provided_password = None
-
-    expected_username = current_app.config[ConfigurationKeys.WEBLAB_USERNAME]
-    expected_password = current_app.config[ConfigurationKeys.WEBLAB_PASSWORD]
-    if provided_username != expected_username or provided_password != expected_password:
-        if request.url.endswith('/test'):
-            error_message = "Invalid credentials: no username provided"
-            if provided_username:
-                error_message = "Invalid credentials: wrong username provided. Check the lab logs for further information."
-            return Response(json.dumps(dict(valid=False, error_messages=[error_message])), status=401, headers={'WWW-Authenticate':'Basic realm="Login Required"', 'Content-Type': 'application/json'})
-
-        if expected_username:
-            current_app.logger.warning("Invalid credentials provided to access {}. Username provided: {!r} (expected: {!r})".format(request.url, provided_username, expected_username))
-
-        return Response(response=("You don't seem to be a WebLab-Instance"), status=401, headers={'WWW-Authenticate':'Basic realm="Login Required"'})
-
-    return None
-
-
-
-@_weblab_blueprint.route("/sessions/api")
-def _api_version():
-    """
-    Just return the api version as defined. If in the future we support new features, they will fall under new API versions. If the report version is 1, it will only consume whatever was provided in version 1.
-    """
-    return jsonify(api_version="1")
-
-
-
-@_weblab_blueprint.route("/sessions/test")
-def _test():
-    """
-    Just return that the settings are right. For example, if the password was incorrect, then something else will fail
-    """
-    return jsonify(valid=True)
-
-
-
-@_weblab_blueprint.route("/sessions/", methods=['POST'])
-def _start_session():
-    """
-    Create a new session: WebLab-Deusto is telling us that a new user is coming. We register the user in the backend system.
-    """
-    request_data = request.get_json(force=True)
-    return jsonify(**_process_start_request(request_data))
-
-def _process_start_request(request_data):
-    """ Auxiliar method, called also from the Flask CLI to fake_user """
-    client_initial_data = request_data['client_initial_data']
-    server_initial_data = request_data['server_initial_data']
-
-    # Parse the initial date + assigned time to know the maximum time
-    start_date_str = server_initial_data['priority.queue.slot.start']
-    start_date_str, microseconds = start_date_str.split('.')
-    difference = datetime.timedelta(microseconds=int(microseconds))
-    start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d %H:%M:%S") + difference
-    slot_length = float(server_initial_data['priority.queue.slot.length'])
-    max_date = start_date + datetime.timedelta(seconds=slot_length)
-    locale = server_initial_data.get('request.locale')
-    full_name = server_initial_data['request.full_name']
-    if locale and len(locale) > 2:
-        locale = locale[:2]
-
-    experiment_name = server_initial_data['request.experiment_id.experiment_name']
-    category_name = server_initial_data['request.experiment_id.category_name']
-    experiment_id = '{}@{}'.format(experiment_name, category_name)
-
-    # Create a global session
-    session_id = create_token()
-
-    # Prepare adding this to backend
-    user = CurrentUser(session_id=session_id, back=request_data['back'],
-                       last_poll=_current_timestamp(), max_date=float(_to_timestamp(max_date)),
-                       username=server_initial_data['request.username'],
-                       username_unique=server_initial_data['request.username.unique'],
-                       exited=False, data={}, locale=locale,
-                       full_name=full_name, experiment_name=experiment_name,
-                       experiment_id=experiment_id, category_name=category_name,
-                       request_client_data=client_initial_data,
-                       request_server_data=server_initial_data,
-                       start_date=float(_to_timestamp(start_date)))
-
-    backend = _current_backend()
-
-    backend.add_user(session_id, user, expiration=30 + int(float(server_initial_data['priority.queue.slot.length'])))
-
-
-    kwargs = {}
-    scheme = current_app.config.get(ConfigurationKeys.WEBLAB_SCHEME)
-    if scheme:
-        kwargs['_scheme'] = scheme
-
-    weblab = _current_weblab()
-    if weblab._on_start:
-        _set_weblab_user_cache(user)
-        weblab._set_session_id(session_id)
-        try:
-            data = weblab._on_start(client_initial_data, server_initial_data)
-        except Exception as error:
-            traceback.print_exc()
-            current_app.logger.warning("Error calling _on_start: {}".format(error), exc_info=True)
-            try:
-                _dispose_user(session_id, waiting=True)
-            except Exception as nested_error:
-                traceback.print_exc()
-                current_app.logger.warning("Error calling _on_dispose after _on_start failed: {}".format(nested_error), exc_info=True)
-
-            return dict(error=True, message="Error initializing laboratory")
-        else:
-            backend.update_data(session_id, data)
-            _update_weblab_user_data(None)
-
-    link = url_for('weblab_callback_url', session_id=session_id, _external=True, **kwargs)
-    return dict(url=link, session_id=session_id)
-
-
-
-@_weblab_blueprint.route('/sessions/<session_id>/status')
-def _status(session_id):
-    """
-    This method provides the current status of a particular
-    user.
-    """
-    return jsonify(should_finish=_status_time(session_id))
-
-
-@_weblab_blueprint.route('/sessions/<session_id>', methods=['POST'])
-def _dispose_experiment(session_id):
-    """
-    This method is called to kick one user out. This may happen
-    when an administrator defines so, or when the assigned time
-    is over.
-    """
-    request_data = request.get_json(force=True)
-    if 'action' not in request_data:
-        return jsonify(message="Unknown op")
-
-    if request_data['action'] != 'delete':
-        return jsonify(message="Unknown op")
-
-    try:
-        _dispose_user(session_id, waiting=True)
-    except NotFoundError:
-        return jsonify(message="Not found")
-
-    return jsonify(message="Deleted")
-
-
-######################################################################################
-#
-#
-#     Auxiliar private functions
-#
-#
-
-def _status_time(session_id):
-    weblab = _current_weblab()
-    backend = weblab._backend
-    user = backend.get_user(session_id)
-    if isinstance(user, ExpiredUser) and user.disposing_resources:
-        return 2 # Try again in 2 seconds
-
-    if user.is_anonymous or not isinstance(user, CurrentUser):
-        return -1
-
-    if user.exited:
-        return -1
-
-    if weblab.timeout and weblab.timeout > 0:
-        # If timeout is set to -1, it will never timeout (unless user exited)
-        if user.time_without_polling >= weblab.timeout:
-            return -1
-
-    if user.time_left <= 0:
-        return -1
-
-    return min(weblab.poll_interval, int(user.time_left))
-
-def _update_weblab_user_data(response):
-    # If a developer does:
-    #
-    # weblab_user.data["foo"] = "bar"
-    #
-    # Nothing is triggered in Redis. For this reason, after each request
-    # we check that the data has changed or not.
-    #
-    session_id = _current_session_id()
-    backend = _current_backend()
-    if session_id:
-        if weblab_user.active:
-            current_user = backend.get_user(session_id)
-            if current_user.active:
-                if json.dumps(current_user.data) != weblab_user.data:
-                    backend.update_data(session_id, weblab_user.data)
-
-    return response
-
-
-def _dispose_user(session_id, waiting):
-    backend = _current_backend()
-    user = backend.get_user(session_id)
-    if user.is_anonymous:
-        raise NotFoundError()
-
-    if isinstance(user, CurrentUser):
-        current_expired_user = user.to_expired_user()
-        deleted = backend.delete_user(session_id, current_expired_user)
-
-        if deleted:
-            try:
-                weblab = _current_weblab()
-                if weblab._on_dispose:
-                    weblab._set_session_id(session_id)
-                    _set_weblab_user_cache(user)
-                    try:
-                        weblab._on_dispose()
-                    except Exception:
-                        traceback.print_exc()
-                    _update_weblab_user_data(None)
-            finally:
-                backend.finished_dispose(session_id)
-
-            unfinished_tasks = backend.get_unfinished_tasks(session_id)
-            for task_id in unfinished_tasks:
-                unfinished_task = weblab.get_task(task_id)
-                if unfinished_task:
-                    unfinished_task.stop()
-
-            while unfinished_tasks:
-                unfinished_tasks = backend.get_unfinished_tasks(session_id)
-                time.sleep(0.1)
-
-            backend.clean_session_tasks(session_id)
-
-            backend.report_session_deleted(session_id)
-
-    if waiting:
-        # if another thread has started the _dispose process, it might take long
-        # to process it. But this (sessions) is the one that tells WebLab-Deusto
-        # that someone else can enter in this laboratory. So we should wait
-        # here until the process is over.
-
-        while not backend.is_session_deleted(session_id):
-            # In the future, instead of waiting, this could be returning that it is still finishing
-            time.sleep(0.1)
 
 
 class _CleanerThread(threading.Thread):

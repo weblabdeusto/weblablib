@@ -1,9 +1,51 @@
 import abc
 import six
 
-from werkzeug import ImmutableDict
+from werkzeug import ImmutableDict, LocalProxy
+from flask import g
 
-from weblablib.utils import create_token, _current_backend, _current_timestamp, _current_weblab
+from weblablib.utils import create_token, _current_backend, _current_timestamp, \
+     _current_weblab, _current_session_id
+
+def get_weblab_user(cached=True):
+    """
+    Get the current user. If ``cached=True`` it will store it and return the same each time.
+    If you need to get always a different one get it with ``cached=False``. In long tasks, for
+    example, it's normal to call it with ``cached=False`` so it gets updated with whatever
+    information comes from other threads.
+
+    Two shortcuts exist to this function:
+     * :data:`weblab_user`: it is equivalent to ``get_weblab_user(cached=True)``
+     * :data:`socket_weblab_user`: it is equivalent to ``get_weblab_user(cached=False)``
+
+    Given that the function always returns a :class:`CurrentUser` or :class:`ExpiredUser` or :class:`AnonymousUser`, it's safe to do things like::
+
+       if not weblab_user.anonymous:
+           print(weblab_user.username)
+           print(weblab_user.username_unique)
+
+    :param cached: if this method is called twice in the same thread, it will return the same object.
+    """
+    if cached and hasattr(g, 'weblab_user'):
+        return g.weblab_user
+
+    # Cached: then use Redis
+    session_id = _current_session_id()
+    if session_id is None:
+        return _set_weblab_user_cache(AnonymousUser())
+
+    user = _current_backend().get_user(session_id)
+    # Store it for next requests in the same call
+    return _set_weblab_user_cache(user)
+
+def _set_weblab_user_cache(user):
+    g.weblab_user = user
+    return user
+
+weblab_user = LocalProxy(get_weblab_user) # pylint: disable=invalid-name
+
+socket_weblab_user = LocalProxy(lambda: get_weblab_user(cached=False)) # pylint: disable=invalid-name
+
 
 class WebLabUser(object):
     """
