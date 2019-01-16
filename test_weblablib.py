@@ -79,7 +79,7 @@ class BaseWebLabTest(unittest.TestCase):
             return True
 
         self.weblab.init_app(self.app)
-        self.weblab._redis_manager.client.flushall()
+        self.weblab._backend.client.flushall()
 
         @self.weblab.on_start
         def on_start(client_data, server_data):
@@ -1146,7 +1146,7 @@ class CLITest(BaseCLITest):
             }
             session_id_line = [ line for line in result.output.splitlines() if self.server_name in line ][0]
             session_id = session_id_line.strip().split('/')[-1]
-            self.weblab._redis_manager._tests_delete_user(session_id)
+            self.weblab._backend._tests_delete_user(session_id)
 
             result = runner.invoke(self.app.cli, ["weblab", "fake", "dispose"])
             self.assertIn("Not found", result.output)
