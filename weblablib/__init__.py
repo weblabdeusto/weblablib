@@ -40,12 +40,9 @@ Please, check the examples in the examples folder in the github repo.
 from __future__ import unicode_literals, print_function, division
 
 import os
-import abc
 import sys
-import json
 import time
 import atexit
-import base64
 import pickle
 import signal
 import datetime
@@ -60,8 +57,7 @@ import redis
 import click
 import requests
 
-from werkzeug import LocalProxy, ImmutableDict
-from flask import Blueprint, Response, jsonify, request, current_app, redirect, \
+from flask import jsonify, request, current_app, redirect, \
      url_for, g, session, after_this_request, render_template, Markup, \
      has_request_context, has_app_context
 
