@@ -42,6 +42,6 @@ setup(name='weblablib',
       author_email='dev@labsland.com',
       url='https://docs.labsland.com/weblablib/',
       license=cp_license,
-      py_modules=['weblablib'],
+      packages=['weblablib', 'weblablib.backends'],
       install_requires=['redis', 'flask>=0.12', 'six', 'requests'],
      )
