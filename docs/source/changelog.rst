@@ -19,11 +19,15 @@ Tasks
 ^^^^^
 
  * ``ensure_unique`` has been replaced by ``unique='global'``. This allows us to put also ``unique='user'`` for concurrent laboratories.
+ * ``WebLabTask`` does not get updated automatically. This provides more reliability (until now, you could do ``if not task.finished: (something with task)`` but it may have finished by then. There are two ways to refresh the information: ``retrieve`` (inside or outside the running task) and ``store`` (only inside the task).
+ * ``task.data`` return an immutable dictionary, to enforce the idea that only the task changes the contents of the task.
 
 Bug fixes:
 ^^^^^^^^^^
 
  * If the ``on_dispose`` was long, it would happen that WebLab would consider the experiment already finished.
+ * UTC issues are fixed (if newer versions of WebLab are used)
+ * Reduce the verbosity of logs when Redis is restarting
 
 
 Version 0.4.1
