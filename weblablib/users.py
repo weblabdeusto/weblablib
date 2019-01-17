@@ -269,8 +269,8 @@ class DataHolder(dict):
     def _get_hash(self, data):
         data_str = json.dumps(data)
         if six.PY2:
-            data_str = data_str.encode('utf8')
-        return zlib.crc32(data_str.decode('utf8'))
+            data_str = data_str.decode('utf8')
+        return zlib.crc32(data_str.encode('utf8'))
 
     def store(self):
         backend = _current_backend()
