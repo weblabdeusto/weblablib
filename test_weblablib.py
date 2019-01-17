@@ -627,7 +627,8 @@ class UserTest(BaseSessionWebLabTest):
         should_finish = self.status()['should_finish']
 
         # Ask in 2..3 seconds (not 5)
-        self.assertTrue(2 <= should_finish <= 3)
+        self.assertGreater(should_finish, 1.5)
+        self.assertLower(should_finish, 3)
 
     def test_status_concrete_time_left(self):
         # New user, with 3 seconds
@@ -636,7 +637,8 @@ class UserTest(BaseSessionWebLabTest):
         should_finish = self.status()['should_finish']
 
         # Ask in 2..3 seconds (not 5)
-        self.assertTrue(2 <= should_finish <= 3)
+        self.assertGreater(should_finish, 1.5)
+        self.assertLower(should_finish, 3)
 
     def test_status_exited(self):
         # New user, with 3 seconds

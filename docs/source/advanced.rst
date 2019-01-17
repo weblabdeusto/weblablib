@@ -70,6 +70,11 @@ Or asynchronously (common when it's tasks) and play with the ``WebLabTask`` obje
    task.stop() # Raises a flag
    task.stopping # True or False
 
+.. note:: 
+
+   The ``WebLabTask`` object does not change automatically. If you want to refresh it, you need to
+   manually call ``task.store()`` inside the task or ``task.retrieve()`` outside the task.
+
 If you store the ``task.task_id``, you can retrieve the task in other views or later on:
 
 .. code-block:: python
@@ -153,7 +158,8 @@ Also, inside the task, you can get information and change information about the 
        # ...
        current_task.task_id
        print(current_task.data)
-       current_task.update_data({ 'a': 'b' })
+       current_task.data['a'] = 'b'
+       current_task.store() # Store the changes so far
 
        if current_task.stopping:
            # ...
