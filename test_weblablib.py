@@ -421,7 +421,7 @@ class UserTest(BaseSessionWebLabTest):
             return "ERROR"
         weblablib.current_task.data = {'inside': 'previous'}
         weblablib.current_task.update_data({'inside': 'yes'})
-        weblablib.weblab_user.data.download()
+        weblablib.weblab_user.data.retrieve()
         return [ self.counter, weblablib.weblab_user.data['foo'] ]
 
     def test_simple(self):
