@@ -46,6 +46,7 @@ import atexit
 import pickle
 import signal
 import datetime
+import warnings
 import threading
 import traceback
 import webbrowser
@@ -400,6 +401,12 @@ class WebLab(object):
         @self._app.after_request
         def after_request(response):
             response.headers['powered-by'] = doc_link
+
+            if weblab_user.active:
+                # Store data information if modified during the request
+                weblab_user.data.upload_if_modified()
+                print("Uploaded data if modified")
+
             return response
 
         click.disable_unicode_literals_warning = True
@@ -757,6 +764,10 @@ class WebLab(object):
                     'message': '{}'.format(error),
                 })
             else:
+                if user.data.is_modified:
+                    msg = "weblablib: you changed weblab_user.data inside a task. You need to call weblab_user.data.upload() to upload the data to the server (tasks are long-running so it's risky to just rely on a modification in the end of the task)."
+                    warnings.warn(msg)
+                    current_app.logger.warning(msg)
                 self._backend.finish_task(task_id, result=result)
             finally:
                 delattr(g, '_weblab_task_id')

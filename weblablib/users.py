@@ -6,13 +6,19 @@
 from __future__ import unicode_literals, print_function, division
 
 import abc
+import json
+import zlib
+import warnings
+
 import six
 
 from werkzeug import ImmutableDict, LocalProxy
-from flask import g
+from flask import g, current_app
 
 from weblablib.utils import create_token, _current_backend, _current_timestamp, \
      _current_weblab, _current_session_id
+
+from weblablib.tasks import current_task
 
 def get_weblab_user(cached=True):
     """
@@ -250,6 +256,45 @@ class _CurrentOrExpiredUser(WebLabUser): # pylint: disable=abstract-method
         backend = _current_backend()
         backend.clean_actions(session_id)
 
+class DataHolder(dict):
+    def __init__(self, user, data, previous_hash=None):
+        super(DataHolder, self).__init__(data)
+        self._user = user
+        self._initial_hash = previous_hash or self._get_hash(data)
+
+    @property
+    def initial_hash(self):
+        return self._initial_hash
+
+    def _get_hash(self, data):
+        data_str = json.dumps(data)
+        if six.PY2:
+            data_str = data_str.encode('utf8')
+        return zlib.crc32(data_str.decode('utf8'))
+
+    def upload(self):
+        backend = _current_backend()
+        data = self.copy()
+        backend.update_data(self._user._session_id, data)
+        self._initial_hash = self._get_hash(data)
+
+    def upload_if_modified(self):
+        if self.is_modified:
+            self.upload()
+
+    @property
+    def is_modified(self):
+        current_hash = self._get_hash(self)
+        return current_hash != self._initial_hash
+
+    def download(self):
+        backend = _current_backend()
+        user = backend.get_user(self._user._session_id)
+        if isinstance(user.data, DataHolder):
+            self.update(user.data)
+            for key in list(self):
+                if key not in user.data:
+                    self.pop(key, None)
 
 @six.python_2_unicode_compatible
 class CurrentUser(_CurrentOrExpiredUser):
@@ -257,6 +302,10 @@ class CurrentUser(_CurrentOrExpiredUser):
     This class is a :class:`WebLabUser` representing a user which is still actively using a
     laboratory. If the session expires, it will become a :class:`ExpiredUser`.
     """
+
+    def __init__(self, *args, **kwargs):
+        super(CurrentUser, self).__init__(*args, **kwargs)
+        self._data = DataHolder(self, self._data)
 
     @property
     def data(self):
@@ -269,27 +318,23 @@ class CurrentUser(_CurrentOrExpiredUser):
 
     @data.setter
     def data(self, data):
-        backend = _current_backend()
-        backend.update_data(self._session_id, data)
-        self._data = data
+        self._data = DataHolder(self, data, previous_hash=self._data.initial_hash)
 
     def update_data(self, new_data=_OBJECT):
         """
-        Updates data::
+        .. deprecated:: 0.5.0
 
-            task.data['foo'] = 'bar'
-            task.update_data()
-
-        or::
-
-            task.update_data({'foo': 'bar'})
+        Use weblab_user.data.upload() or don't use anything if inside a view or on_start.
         """
-        if new_data == _OBJECT:
+        msg = "weblablib: method 'update_data' deprecated. Please use task.data.upload()"
+        warnings.warn(msg)
+        if current_app:
+            current_app.logger.warning(msg)
+
+        if new_data != _OBJECT:
             new_data = self._data
 
-        backend = _current_backend()
-        backend.update_data(self._session_id, new_data)
-        self._data = new_data
+        self.data = self._data
 
     @property
     def time_without_polling(self):
@@ -312,7 +357,7 @@ class CurrentUser(_CurrentOrExpiredUser):
         return ExpiredUser(session_id=self._session_id, back=self._back, max_date=self._max_date,
                            last_poll=self._last_poll, exited=self._exited,
                            username=self._username, username_unique=self._username_unique,
-                           data=self._data, locale=self._locale, full_name=self._full_name,
+                           data=self._data.copy(), locale=self._locale, full_name=self._full_name,
                            experiment_name=self._experiment_name, category_name=self._category_name,
                            experiment_id=self._experiment_id, request_client_data=self._request_client_data,
                            request_server_data=self._request_server_data, start_date=self._start_date,
@@ -415,7 +460,7 @@ class ExpiredUser(_CurrentOrExpiredUser):
 
         Do not change this data in :class:`ExpiredUser`.
         """
-        return self._data
+        return ImmutableDict(self._data)
 
     @data.setter
     def data(self, value):
