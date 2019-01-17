@@ -5,6 +5,7 @@ os:
 #  - windows
 #  - osx
   - linux
+dist: xenial
 python:
   - 2.7
   - 3.3
