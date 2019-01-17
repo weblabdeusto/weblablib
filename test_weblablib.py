@@ -16,6 +16,7 @@ from flask import Flask, url_for, render_template_string, g, session
 import flask.cli as flask_cli
 
 import weblablib
+from weblablib.tasks import _TaskRunner
 import unittest
 from click.testing import CliRunner
 
@@ -421,6 +422,7 @@ class UserTest(BaseSessionWebLabTest):
             return "ERROR"
         weblablib.current_task.data = {'inside': 'previous'}
         weblablib.current_task.update_data({'inside': 'yes'})
+        weblablib.current_task.store()
         weblablib.weblab_user.data.retrieve()
         return [ self.counter, weblablib.weblab_user.data['foo'] ]
 
@@ -465,6 +467,7 @@ class UserTest(BaseSessionWebLabTest):
         self.assertIsNone(task1.result)
         self.assertIsNone(task1.error)
         task1.stop()
+        task1.retrieve()
         self.assertTrue(task1.stopping)
         
         def task(): pass
@@ -702,6 +705,7 @@ class TaskFailTest(BaseSessionWebLabTest):
         with StdWrap():
             self.weblab.run_tasks()
 
+        task.retrieve()
         self.assertEquals(task.status, 'failed')
         self.assertTrue(task.failed)
         self.assertTrue(task.finished)
@@ -907,13 +911,15 @@ class GlobalUniqueTaskTest(BaseSessionWebLabTest):
         task_object = self.unique_task.delay()
         while not self.task_is_running:
             time.sleep(0.05)
-
+        
+        # Now we now that the task is running. Let's run it again
         task2 = self.unique_task.delay()
         task2.join() # Should be fast
         if not task2.failed:
             raise Exception("unique=global should have avoided the second task")
         if task2.error['class'] != 'AlreadyRunningError':
             raise Exception("unique=global expected an AlreadyRunningError; got {}".format(task2.error))
+
         return str(task_object.task_id)
 
     def task(self):
@@ -928,24 +934,29 @@ class GlobalUniqueTaskTest(BaseSessionWebLabTest):
                 raise Exception("Error, nobody calling stop")
 
     def test_global_unique(self):
-        self.weblab.cleaner_thread_interval = 0.1
-        self.task_is_running = False
-
-        @self.weblab.task(unique='global')
-        def task_global_unique():
-            return self.task()
-
-        self.unique_task = task_global_unique
-
-        launch_url1, session_id1 = self.new_user()
-
-        with StdWrap():
-            task_id = self.get_text(self.client.get(launch_url1, follow_redirects=True))
-
-        task = self.weblab.get_task(task_id)
-        task.stop()
-        task.join()
-        self.assertTrue(task.done)
+        original_steps_waiting = _TaskRunner._STEPS_WAITING
+        _TaskRunner._STEPS_WAITING = 1
+        try:
+            self.weblab.cleaner_thread_interval = 0.1
+            self.task_is_running = False
+    
+            @self.weblab.task(unique='global')
+            def task_global_unique():
+                return self.task()
+    
+            self.unique_task = task_global_unique
+    
+            launch_url1, session_id1 = self.new_user()
+    
+            with StdWrap():
+                task_id = self.get_text(self.client.get(launch_url1, follow_redirects=True))
+    
+            task = self.weblab.get_task(task_id)
+            task.stop()
+            task.join()
+            self.assertTrue(task.done)
+        finally:
+            _TaskRunner._STEPS_WAITING = original_steps_waiting
 
 class UserUniqueTaskTest(BaseSessionWebLabTest):
 

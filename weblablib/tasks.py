@@ -12,7 +12,7 @@ import traceback
 import six
 import redis
 
-from werkzeug import LocalProxy
+from werkzeug import LocalProxy, ImmutableDict
 
 from flask import g
 
@@ -138,6 +138,9 @@ class WebLabTask(object):
         self._weblab = weblab
         self._backend = weblab._backend
         self._task_id = task_id
+        self._task_data = self._backend.get_task(task_id)
+        if self._task_data is None:
+            raise ValueError("task id {} not found".format(task_id))
 
     def join(self, timeout=None, error_on_timeout=True):
         """
@@ -155,7 +158,7 @@ class WebLabTask(object):
                 raise RuntimeError("Deadlock detected: you're calling join from the task itself")
 
         initial_time = time.time()
-        while not self.finished:
+        while not self.retrieve().finished:
             if timeout:
                 if time.time() - initial_time > timeout:
                     if error_on_timeout:
@@ -171,19 +174,11 @@ class WebLabTask(object):
         return self._task_id
 
     @property
-    def _task_data(self):
-        return self._backend.get_task(self._task_id)
-
-    @property
     def session_id(self):
         """
         The current ``session_id`` that represents this session.
         """
-        task_data = self._task_data
-        if task_data:
-            return task_data['session_id']
-
-        return None
+        return self._task_data['session_id']
 
     @property
     def name(self):
@@ -196,11 +191,10 @@ class WebLabTask(object):
 
         The name would be ``my_task``.
         """
-        task_data = self._task_data
-        if task_data:
-            return task_data['name']
+        return self._task_data['name']
 
-        return None
+    def _is_current_task(self):
+        return current_task and current_task._task_id == self._task_id
 
     @property
     def data(self):
@@ -211,9 +205,8 @@ class WebLabTask(object):
             @weblab.task()
             def my_task():
                 # Something long, but 80%
-                data = current_task.data
-                data['percent'] = 0.8
-                current_task.update_data(data)
+                current_task.data['percent'] = 0.8
+                current_task.sync()
 
             # From outside
             task = weblab.get_task(task_id)
@@ -223,24 +216,52 @@ class WebLabTask(object):
 
             current_task.data['foo'] = 'bar'
         """
-        task_data = self._task_data
-        if task_data:
-            return task_data['data']
+        if self._is_current_task():
+            return self._task_data['data']
 
-        return None
+        return ImmutableDict(self._task_data['data'])
 
     @data.setter
     def data(self, new_data):
-        self._backend.update_task_data(self._task_id, new_data)
+        if self._is_current_task():
+            self._task_data['data'] = new_data
+        else:
+            raise ValueError("You cannot set data outside the task itself")
 
     def update_data(self, new_data):
-        """Same as::
+        """
+        .. deprecated:: 0.5.0
+
+        Same as::
 
             task.data = new_data
+            task.store()
 
         :param new_data: new data to be stored in the task data.
         """
-        self._backend.update_task_data(self._task_id, new_data)
+        self.data = new_data
+        self.store()
+
+    def store(self):
+        """
+        Stores the current data. This can only be used from the task itself (not from outside).
+
+        :return: the same WebLabTask (already updated)
+        """
+        if self._is_current_task():
+            self._backend.update_task_data(self._task_id, self._task_data['data'])
+            return self
+
+        raise ValueError("You cannot store data outside the task itself")
+
+    def retrieve(self):
+        """
+        Retrieves a new version of the current task (updating status, data, etc.). 
+
+        :return: the same WebLabTask (already updated)
+        """
+        self._task_data = self._backend.get_task(self._task_id)
+        return self
 
     def stop(self):
         """
@@ -281,11 +302,7 @@ class WebLabTask(object):
          * :data:`WebLabTask.finished` (which is is ``True`` if ``done`` or ``failed``)
 
         """
-        task_data = self._task_data
-        if task_data:
-            return task_data['status']
-
-        return None
+        return self._task_data['status']
 
     @property
     def done(self):
@@ -322,11 +339,7 @@ class WebLabTask(object):
         """
         Did anyone call :meth:`WebLabTask.stop`? If so, you should stop running the current task.
         """
-        task_data = self._task_data
-        if task_data:
-            return task_data['stopping']
-
-        return None
+        return self._task_data['stopping']
 
     @property
     def result(self):
@@ -334,11 +347,7 @@ class WebLabTask(object):
         In case of having finished succesfully (:data:`WebLabTask.done` being ``True``), this
         returns the result. Otherwise, it returns ``None``.
         """
-        task_data = self._task_data
-        if task_data:
-            return task_data['result']
-
-        return None
+        return self._task_data['result']
 
     @property
     def error(self):
@@ -354,11 +363,7 @@ class WebLabTask(object):
               'message': '<result of converting the error in string>'
            }
         """
-        task_data = self._task_data
-        if task_data:
-            return task_data['error']
-
-        return None
+        return self._task_data['error']
 
     def __repr__(self):
         """Represent a WebLab task"""
@@ -394,6 +399,7 @@ class WebLabTask(object):
 class _TaskRunner(threading.Thread):
 
     _instances = []
+    _STEPS_WAITING = 20
 
     def __init__(self, number, weblab, app):
         super(_TaskRunner, self).__init__()
@@ -423,7 +429,7 @@ class _TaskRunner(threading.Thread):
                 traceback.print_exc()
                 continue
 
-            for _ in six.moves.range(20):
+            for _ in six.moves.range(_TaskRunner._STEPS_WAITING):
                 time.sleep(0.05)
                 if self._stopping:
                     break
@@ -434,15 +440,23 @@ def _current_task():
     if task_id is None:
         return None
 
-    weblab = _current_weblab()
-    return WebLabTask(weblab=weblab, task_id=task_id)
+    weblab_task = getattr(g, '_weblab_task', None)
+    if weblab_task is None:
+        weblab = _current_weblab()
+        weblab_task = WebLabTask(weblab=weblab, task_id=task_id)
+        g._weblab_task = weblab_task
+    
+    return weblab_task
 
 current_task = LocalProxy(_current_task) # pylint: disable=invalid-name
 
 def _current_task_stopping():
     task = _current_task()
-    if task:
-        return task.stopping
-    return False
+    if not task:
+        return False
+
+    weblab = _current_weblab()
+    updated_task_data = weblab._backend.get_task(task.task_id)
+    return updated_task_data['stopping']
 
 current_task_stopping = LocalProxy(_current_task_stopping) # pylint: disable=invalid-name

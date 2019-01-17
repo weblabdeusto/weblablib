@@ -69,8 +69,9 @@ def dispose_user(session_id, waiting):
         if deleted:
             try:
                 weblab = _current_weblab()
+                weblab._set_session_id(session_id)
                 if weblab._on_dispose:
-                    weblab._set_session_id(session_id)
+
                     _set_weblab_user_cache(user)
                     try:
                         weblab._on_dispose()
