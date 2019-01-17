@@ -155,7 +155,7 @@ def _process_start_request(request_data):
         else:
             if data:
                 user.data = data
-            user.data.upload_if_modified()
+            user.data.store_if_modified()
             update_weblab_user_data(None)
 
     link = url_for('weblab_callback_url', session_id=session_id, _external=True, **kwargs)

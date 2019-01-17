@@ -404,7 +404,7 @@ class WebLab(object):
 
             if weblab_user.active:
                 # Store data information if modified during the request
-                weblab_user.data.upload_if_modified()
+                weblab_user.data.store_if_modified()
                 print("Uploaded data if modified")
 
             return response
@@ -765,7 +765,7 @@ class WebLab(object):
                 })
             else:
                 if user.data.is_modified:
-                    msg = "weblablib: you changed weblab_user.data inside a task. You need to call weblab_user.data.upload() to upload the data to the server (tasks are long-running so it's risky to just rely on a modification in the end of the task)."
+                    msg = "weblablib: you changed weblab_user.data inside a task. You need to call weblab_user.data.store() to upload the data to the server (tasks are long-running so it's risky to just rely on a modification in the end of the task)."
                     warnings.warn(msg)
                     current_app.logger.warning(msg)
                 self._backend.finish_task(task_id, result=result)

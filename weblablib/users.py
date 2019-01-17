@@ -272,22 +272,22 @@ class DataHolder(dict):
             data_str = data_str.encode('utf8')
         return zlib.crc32(data_str.decode('utf8'))
 
-    def upload(self):
+    def store(self):
         backend = _current_backend()
         data = self.copy()
         backend.update_data(self._user._session_id, data)
         self._initial_hash = self._get_hash(data)
 
-    def upload_if_modified(self):
+    def store_if_modified(self):
         if self.is_modified:
-            self.upload()
+            self.store()
 
     @property
     def is_modified(self):
         current_hash = self._get_hash(self)
         return current_hash != self._initial_hash
 
-    def download(self):
+    def retrieve(self):
         backend = _current_backend()
         user = backend.get_user(self._user._session_id)
         if isinstance(user.data, DataHolder):
@@ -324,9 +324,9 @@ class CurrentUser(_CurrentOrExpiredUser):
         """
         .. deprecated:: 0.5.0
 
-        Use weblab_user.data.upload() or don't use anything if inside a view or on_start.
+        Use weblab_user.data.store() or don't use anything if inside a view or on_start.
         """
-        msg = "weblablib: method 'update_data' deprecated. Please use task.data.upload()"
+        msg = "weblablib: method 'update_data' deprecated. Please use task.data.store()"
         warnings.warn(msg)
         if current_app:
             current_app.logger.warning(msg)
