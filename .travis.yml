@@ -8,7 +8,6 @@ os:
 dist: xenial
 python:
   - 2.7
-  - 3.3
   - 3.6
   - 3.7
 install:
