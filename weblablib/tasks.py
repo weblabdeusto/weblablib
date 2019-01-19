@@ -457,6 +457,9 @@ def _current_task_stopping():
 
     weblab = _current_weblab()
     updated_task_data = weblab._backend.get_task(task.task_id)
-    return updated_task_data['stopping']
+    if updated_task_data
+        return updated_task_data['stopping']
+
+    return False
 
 current_task_stopping = LocalProxy(_current_task_stopping) # pylint: disable=invalid-name
