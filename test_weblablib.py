@@ -406,7 +406,8 @@ class UserTest(BaseSessionWebLabTest):
     def lab(self):
         task = self.current_task.delay()
         # check that it's a dictionary
-        weblablib.weblab_user.data['foo'] = 'bar'
+        if weblablib.weblab_user.active:
+            weblablib.weblab_user.data['foo'] = 'bar'
 
         # And in any case build another
         if weblablib.weblab_user.active:
