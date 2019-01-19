@@ -764,7 +764,7 @@ class WebLab(object):
                     'message': '{}'.format(error),
                 })
             else:
-                if geattr(user.data, 'is_modified') and user.data.is_modified:
+                if getattr(user.data, 'is_modified') and user.data.is_modified:
                     msg = "weblablib: you changed weblab_user.data inside a task. You need to call weblab_user.data.store() to upload the data to the server (tasks are long-running so it's risky to just rely on a modification in the end of the task)."
                     warnings.warn(msg)
                     current_app.logger.warning(msg)
