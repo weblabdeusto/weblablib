@@ -3,6 +3,14 @@
 Changelog
 =========
 
+Version 0.5.1
+-------------
+
+Bug fixes:
+^^^^^^^^^^
+
+ * Critical bugfix in case of abrupt restart while keeping Redis information.
+
 
 Version 0.5.0
 -------------
