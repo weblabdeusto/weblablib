@@ -457,7 +457,7 @@ def _current_task_stopping():
 
     weblab = _current_weblab()
     updated_task_data = weblab._backend.get_task(task.task_id)
-    if updated_task_data
+    if updated_task_data:
         return updated_task_data['stopping']
 
     return False
