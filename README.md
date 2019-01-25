@@ -1,6 +1,6 @@
 # weblablib
 
-[![documentation](https://readthedocs.org/projects/weblablib/badge/?version=latest)](https://docs.labsland.com/weblablib/)
+[![documentation](https://readthedocs.org/projects/weblablib/badge/?version=latest)](https://developers.labsland.com/weblablib/)
 [![Version](https://img.shields.io/pypi/v/weblablib.svg)](https://pypi.python.org/pypi/weblablib/)
 [![Python versions](https://img.shields.io/pypi/pyversions/weblablib.svg)](https://pypi.python.org/pypi/weblablib/)
 [![build status](https://travis-ci.org/weblabdeusto/weblablib.svg?branch=master)](https://travis-ci.org/weblabdeusto/weblablib)
@@ -21,7 +21,7 @@ If you are familiar with Flask and with Web development, and want to be able to 
 
 ## Documentation
 
-Read the documentation: https://docs.labsland.com/weblablib/
+Read the documentation: https://developers.labsland.com/weblablib/
 
 ## Installation
 

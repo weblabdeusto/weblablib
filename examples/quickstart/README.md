@@ -1,6 +1,6 @@
 # quickstart
 
-This is the code that you find in the quickstart (in the docs)[https://docs.labsland.com/weblablib/]
+This is the code that you find in the quickstart (in the docs)[https://developers.labsland.com/weblablib/]
 
 ## step1
 

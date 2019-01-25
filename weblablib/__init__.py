@@ -9,7 +9,7 @@ documentation about WebLab-Deusto at:
 
 And the documentation on weblablib at:
 
-   https://docs.labsland.com/weblablib/
+   https://developers.labsland.com/weblablib/
 
 This library heavily relies on Flask, so if you are new to Flask, you might find very useful to
 learn a bit about it first:
@@ -261,7 +261,7 @@ class WebLab(object):
         elif self._callback_url.endswith('/'):
             print("Note: your callback URL ({}) ends with '/'. It is discouraged".format(self._callback_url), file=sys.stderr)
 
-        doc_link = 'https://docs.labsland.com/weblablib/'
+        doc_link = 'https://developers.labsland.com/weblablib/'
 
         @self._app.route(self._callback_url + '/<session_id>')
         def weblab_callback_url(session_id):

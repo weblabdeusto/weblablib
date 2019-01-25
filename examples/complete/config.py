@@ -20,7 +20,7 @@ class Config(object):
     WEBLAB_PASSWORD = os.environ.get('WEBLAB_PASSWORD') or 'password'
 
     # If an unauthorized user comes in, redirect him to this link
-    WEBLAB_UNAUTHORIZED_LINK = 'https://docs.labsland.com/weblablib/'
+    WEBLAB_UNAUTHORIZED_LINK = 'https://developers.labsland.com/weblablib/'
 
     # Alternatively, you can establish a template that will be rendered
     # WEBLAB_UNAUTHORIZED_TEMPLATE = 'unauthorized.html'

@@ -6,6 +6,9 @@ Changelog
 Version 0.5.2
 -------------
 
+Link: https://developers.labsland.com/weblablib/en/0.5.2/
+Date: January 25th, 2019
+
 Bug fixes:
 ^^^^^^^^^^
 
@@ -13,6 +16,9 @@ Bug fixes:
 
 Version 0.5.1
 -------------
+
+Link: https://developers.labsland.com/weblablib/en/0.5.1/
+Date: January 19th, 2019
 
 Bug fixes:
 ^^^^^^^^^^
@@ -23,7 +29,8 @@ Bug fixes:
 Version 0.5.0
 -------------
 
-Link: https://docs.labsland.com/weblablib/en/0.5.0/
+Link: https://developers.labsland.com/weblablib/en/0.5.0/
+Date: January 17th, 2019
 
 General
 ^^^^^^^
@@ -49,7 +56,8 @@ Bug fixes:
 Version 0.4.1
 -------------
 
-Link: https://docs.labsland.com/weblablib/en/0.4.1/
+Link: https://developers.labsland.com/weblablib/en/0.4.1/
+Date: August 19th, 2018
 
 Bug fixes:
 ^^^^^^^^^^
@@ -60,7 +68,8 @@ In some contexts, the poll message receives a temporary error (such as 502). In 
 Version 0.4
 -----------
 
-Link: https://docs.labsland.com/weblablib/en/0.4/
+Link: https://developers.labsland.com/weblablib/en/0.4/
+Date: September 6th, 2017
 
 General
 ^^^^^^^
@@ -122,7 +131,8 @@ CLI changes
 Version 0.3
 -----------
 
-Link: https://docs.labsland.com/weblablib/en/0.3/
+Link: https://developers.labsland.com/weblablib/en/0.3/
+Date: August 29th, 2017
 
  * Added ``weblab_user.locale`` for i18n processing.
  * Added ``weblab_user.experiment_name``, ``weblab_user.category_name`` and ``weblab_user.experiment_id`` as more metadata about the context on how the laboratory is used.
@@ -137,6 +147,7 @@ Link: https://docs.labsland.com/weblablib/en/0.3/
 Version 0.2
 -----------
 
-Link: https://docs.labsland.com/weblablib/en/0.2/
+Link: https://developers.labsland.com/weblablib/en/0.2/
+Date: August 26th, 2017
 
 Version 0.1 was uploaded to Pypi, etc., but was not production ready (no tests, docs, some bugs, etc.)
