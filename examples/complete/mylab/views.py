@@ -69,8 +69,6 @@ def microcontroller(data):
     current_app.logger.debug(" - Result: {}".format(task.result))
     current_app.logger.debug(" - Error: {}".format(task.error))
 
-    weblab_user.data['programming_task'] = task.task_id
-
     emit('board-status', hardware_status(), namespace='/mylab')
 
 

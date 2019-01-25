@@ -132,11 +132,9 @@ def hardware_status():
     else:
         microcontroller = gettext("Invalid state: %(state)s", state=state)
 
-    task_id = weblab_user.data.get('programming_task')
-    if task_id:
-        task = weblab.get_task(task_id)
-        if task:
-            print("Current programming task status: %s (error: %s; result: %s)" % (task.status, task.error, task.result))
+    task = weblab.get_task(program_device)
+    if task:
+        print("Current programming task status: %s (error: %s; result: %s)" % (task.status, task.error, task.result))
 
     return dict(lights=lights_data, microcontroller=microcontroller, time_left=weblab_user.time_left)
 
