@@ -888,6 +888,10 @@ class WebLab(object):
             name = identifier.__name__
             func = True
 
+        if hasattr(identifier, '_func') and hasattr(identifier._func, '__code__'):
+            name = identifier._func.__name__
+            func = True
+
         if not func:
             task_data = self._backend.get_task(name)
             if task_data:
@@ -939,6 +943,10 @@ class WebLab(object):
         if hasattr(func_or_name, '__code__'):
             name = func_or_name.__name__
 
+        if hasattr(func_or_name, '_func') and hasattr(func_or_name._func, '__code__'):
+            name = func_or_name._func.__name__
+            func = True
+
         tasks = []
         for task in self.running_tasks:
             if task.name == name:
@@ -970,6 +978,10 @@ class WebLab(object):
         name = func_or_name
         if hasattr(func_or_name, '__code__'):
             name = func_or_name.__name__
+
+        if hasattr(func_or_name, '_func') and hasattr(func_or_name._func, '__code__'):
+            name = func_or_name._func.__name__
+            func = True
 
         tasks = []
         for task in self.tasks:

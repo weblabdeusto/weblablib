@@ -471,11 +471,9 @@ class UserTest(BaseSessionWebLabTest):
         task1.retrieve()
         self.assertTrue(task1.stopping)
         
-        def task(): pass
-
-        task1b = self.weblab.get_task(task)
+        task1b = self.weblab.get_task(self.current_task)
         task1c = self.weblab.get_task('task')
-        task1d = self.weblab.get_running_task(task)
+        task1d = self.weblab.get_running_task(self.current_task)
         task1e = self.weblab.get_running_task('task')
 
         self.assertEquals(task1b, task1)
@@ -483,9 +481,9 @@ class UserTest(BaseSessionWebLabTest):
         self.assertEquals(task1d, task1)
         self.assertEquals(task1e, task1)
 
-        tasks_b = self.weblab.get_tasks(task)
+        tasks_b = self.weblab.get_tasks(self.current_task)
         tasks_c = self.weblab.get_tasks('task')
-        tasks_d = self.weblab.get_running_tasks(task)
+        tasks_d = self.weblab.get_running_tasks(self.current_task)
         tasks_e = self.weblab.get_running_tasks('task')
 
         self.assertEquals(1, len(tasks_b))
@@ -504,7 +502,7 @@ class UserTest(BaseSessionWebLabTest):
         # We're outside a task
         self.assertFalse(weblablib.current_task_stopping)
 
-        self.weblab.join_tasks(task, timeout=0.01, stop=True)
+        self.weblab.join_tasks(self.current_task, timeout=0.01, stop=True)
 
         # But the counter is still zero
         self.assertEquals(self.counter, 0)
@@ -562,9 +560,9 @@ class UserTest(BaseSessionWebLabTest):
         self.assertFalse(task1 < task2)
         self.assertFalse(task2 < task1)
 
-        task2b = self.weblab.get_task(task)
+        task2b = self.weblab.get_task(self.current_task)
         task2c = self.weblab.get_task('task')
-        task2d = self.weblab.get_running_task(task)
+        task2d = self.weblab.get_running_task(self.current_task)
         task2e = self.weblab.get_running_task('task')
         self.assertEquals(task2b, task2)
         self.assertEquals(task2c, task2)
