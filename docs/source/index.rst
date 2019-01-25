@@ -5,7 +5,7 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-weblablib - 0.5.1
+weblablib - 0.5.2
 =================
 
 weblablib is a library for creating `WebLab-Deusto <https://github.com/weblabdeusto/weblabdeusto/>`_ remote laboratories.

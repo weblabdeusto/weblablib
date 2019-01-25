@@ -3,6 +3,14 @@
 Changelog
 =========
 
+Version 0.5.2
+-------------
+
+Bug fixes:
+^^^^^^^^^^
+
+ * Critical bugfix in get_task(func) not working
+
 Version 0.5.1
 -------------
 
