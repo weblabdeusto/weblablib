@@ -326,7 +326,7 @@ class CurrentUser(_CurrentOrExpiredUser):
 
         Use weblab_user.data.store() or don't use anything if inside a view or on_start.
         """
-        msg = "weblablib: method 'update_data' deprecated. Please use task.data.store()"
+        msg = "weblablib: method 'update_data' deprecated. Please use weblab_user.data.store()"
         warnings.warn(msg)
         if current_app:
             current_app.logger.warning(msg)
