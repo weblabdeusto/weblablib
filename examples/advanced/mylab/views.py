@@ -40,11 +40,9 @@ def status():
 
     microcontroller = get_microcontroller_state()
 
-    task_id = session.get('programming_task')
-    if task_id:
-        task = weblab.get_task(task_id)
-        if task:
-            current_app.logger.debug("Current programming task status: %s (error: %s; result: %s)", task.status, task.error, task.result)
+    task = weblab.get_task(program_device)
+    if task:
+        current_app.logger.debug("Current programming task status: %s (error: %s; result: %s)", task.status, task.error, task.result)
 
     return jsonify(error=False, lights=lights, microcontroller=microcontroller, time_left=weblab_user.time_left)
 
@@ -100,8 +98,6 @@ def microcontroller():
     # Result and error will be None unless status is 'done' or 'failed'
     current_app.logger.debug(" - Result: {}".format(task.result))
     current_app.logger.debug(" - Error: {}".format(task.error))
-
-    session['programming_task'] = task.task_id
 
     return status()
 
