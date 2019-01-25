@@ -25,12 +25,12 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(name='weblablib',
-      version='0.5.1',
+      version='0.5.2',
       description="WebLab-Deusto library for creating unmanaged laboratories",
       long_description=long_description,
       long_description_content_type="text/markdown",
       project_urls=OrderedDict((
-            ('Documentation', 'https://docs.labsland.com/weblablib/en/stable/'),
+            ('Documentation', 'https://developers.labsland.com/weblablib/en/stable/'),
             ('Code', 'https://github.com/weblabdeusto/weblablib'),
             ('Issue tracker', 'https://github.com/weblabdeusto/weblablib/issues'),
       )),
@@ -38,8 +38,8 @@ setup(name='weblablib',
       zip_safe=False,
       author='LabsLand',
       author_email='dev@labsland.com',
-      url='https://docs.labsland.com/weblablib/',
+      url='https://developers.labsland.com/weblablib/',
       license=cp_license,
       packages=['weblablib', 'weblablib.backends'],
-      install_requires=['redis', 'flask>=0.12', 'six', 'requests'],
+      install_requires=['redis', 'flask>=0.12.3', 'six', 'requests'],
      )
