@@ -41,6 +41,7 @@ from __future__ import unicode_literals, print_function, division
 
 import os
 import sys
+import json
 import time
 import atexit
 import pickle
@@ -485,7 +486,9 @@ class WebLab(object):
         @click.option('--experiment-name', default='mylab', help="Experiment name")
         @click.option('--category-name', default='Lab Experiments', help="Category name (of the experiment)")
         @click.option('--dont-open-browser', is_flag=True, help="Do not open the fake user in a web browser")
-        def fake_user(name, username, username_unique, assigned_time, back, locale, experiment_name, category_name, dont_open_browser):
+        @click.option('--client-initial-data', default='{}', help="Client initial data")
+        @click.option('--client-initial-data-file', default=None, help="Client initial data (JSON file)")
+        def fake_user(name, username, username_unique, assigned_time, back, locale, experiment_name, category_name, dont_open_browser, client_initial_data, client_initial_data_file):
             """
             Create a fake WebLab-Deusto user session.
 
@@ -496,9 +499,21 @@ class WebLab(object):
 
             start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + '.0'
             start_time_timestamp = time.time()
+            
+            try:
+                client_initial_data_data = json.loads(client_initial_data)
+            except Exception as json_err:
+                print("Error reading {}: {}".format(client_initial_data, json_err))
+                client_initial_data_data = {}
+
+            if client_initial_data_file:
+                try:
+                    client_initial_data_data = json.load(open(client_initial_data_file))
+                except Exception as err:
+                    print("Error reading {}: {}".format(client_initial_data_file, err))
 
             request_data = {
-                'client_initial_data': {},
+                'client_initial_data': client_initial_data_data,
                 'server_initial_data': {
                     'priority.queue.slot.start': start_time,
                     'priority.queue.slot.start.timestamp': start_time_timestamp,
