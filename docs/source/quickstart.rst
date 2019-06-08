@@ -187,10 +187,10 @@ a file called ``lab.html`` with the following contents:
                   Light {{ light }}
                   <br>
                   <a href="javascript:turnOff({{ light }})">
-                    <img width="50px" id="light_{{ light }}_on" src="https://openclipart.org/download/116581/bulb-on.svg">
+                    <img width="50px" id="light_{{ light }}_on" src="https://files.labsland.com/pub/docs/weblablib/light-on.png">
                   </a>
                   <a href="javascript:turnOn({{ light }})">
-                    <img width="50px" id="light_{{ light }}_off" src="https://openclipart.org/download/110269/1296215547.svg">
+                    <img width="50px" id="light_{{ light }}_off" src="https://files.labsland.com/pub/docs/weblablib/light-off.png">
                   </a>
                 </div>
                 {% endfor %}
@@ -225,10 +225,10 @@ closer look at that one:
         Light {{ light }}
         <br>
         <a href="javascript:turnOff({{ light }})">
-          <img width="50px" id="light_{{ light }}_on" src="https://openclipart.org/download/116581/bulb-on.svg">
+          <img width="50px" id="light_{{ light }}_on" src="https://files.labsland.com/pub/docs/weblablib/light-on.png">
         </a>
         <a href="javascript:turnOn({{ light }})">
-          <img width="50px" id="light_{{ light }}_off" src="https://openclipart.org/download/110269/1296215547.svg">
+          <img width="50px" id="light_{{ light }}_off" src="https://files.labsland.com/pub/docs/weblablib/light-off.png">
         </a>
       </div>
       {% endfor %}
