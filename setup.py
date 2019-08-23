@@ -41,5 +41,5 @@ setup(name='weblablib',
       url='https://developers.labsland.com/weblablib/',
       license=cp_license,
       packages=['weblablib', 'weblablib.backends'],
-      install_requires=['redis', 'flask>=0.12.3', 'six', 'requests'],
+      install_requires=['redis', 'flask', 'six', 'requests'],
      )
