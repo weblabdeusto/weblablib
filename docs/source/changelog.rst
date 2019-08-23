@@ -3,6 +3,18 @@
 Changelog
 =========
 
+Version 0.5.3
+-------------
+
+Link: https://developers.labsland.com/weblablib/en/0.5.3/
+Date: August 23rd, 2019
+
+Changes
+^^^^^^^
+
+ * Before, 'es_ES' was converted to 'es'. Now it's kept as 'es_ES' so as to support more languages.
+
+
 Version 0.5.2
 -------------
 
