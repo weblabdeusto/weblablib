@@ -429,7 +429,7 @@ class UserTest(BaseSessionWebLabTest):
 
     def test_simple(self):
         # New user 
-        launch_url1, session_id1 = self.new_user(language='esp')
+        launch_url1, session_id1 = self.new_user(language='es_ES')
 
         # counter is zero
         self.counter = 0
@@ -439,7 +439,7 @@ class UserTest(BaseSessionWebLabTest):
         response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
 
         self.assertEquals(weblablib.weblab_user.session_id, session_id1)
-        self.assertEquals(weblablib.weblab_user.locale, 'es') # 'es', not 'esp'
+        self.assertEquals(weblablib.weblab_user.locale, 'es_ES')
         self.assertEquals(weblablib.weblab_user.full_name, 'Jim Smith')
         self.assertEquals(weblablib.weblab_user.experiment_name, 'mylab')
         self.assertEquals(weblablib.weblab_user.category_name, 'Lab experiments')
@@ -613,7 +613,7 @@ class UserTest(BaseSessionWebLabTest):
 
         with self.assertRaises(NotImplementedError):
             weblablib.weblab_user.update_data()
-        self.assertEquals(weblablib.weblab_user.locale, 'es')
+        self.assertEquals(weblablib.weblab_user.locale, 'es_ES')
         self.assertEquals(weblablib.weblab_user.full_name, 'Jim Smith')
         self.assertEquals(weblablib.weblab_user.experiment_name, 'mylab')
         self.assertEquals(weblablib.weblab_user.category_name, 'Lab experiments')

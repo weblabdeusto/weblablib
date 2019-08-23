@@ -104,8 +104,6 @@ def _process_start_request(request_data):
     max_date = start_date + datetime.timedelta(seconds=slot_length)
     locale = server_initial_data.get('request.locale')
     full_name = server_initial_data['request.full_name']
-    if locale and len(locale) > 2:
-        locale = locale[:2]
 
     experiment_name = server_initial_data['request.experiment_id.experiment_name']
     category_name = server_initial_data['request.experiment_id.category_name']
