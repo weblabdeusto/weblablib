@@ -12,7 +12,7 @@ Date: August 23rd, 2019
 Changes
 ^^^^^^^
 
- * Before, 'es_ES' was converted to 'es'. Now it's kept as 'es_ES' so as to support more languages.
+ * Before, any call would change current_user.data. Now this only applies to calls that actually modify current_user.data
 
 
 Version 0.5.2
