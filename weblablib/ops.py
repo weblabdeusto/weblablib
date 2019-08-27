@@ -50,7 +50,7 @@ def update_weblab_user_data(response):
         if weblab_user.active:
             current_user = backend.get_user(session_id)
             if current_user.active:
-                if json.dumps(current_user.data) != weblab_user.data:
+                if json.dumps(current_user.data) != json.dumps(weblab_user.data):
                     backend.update_data(session_id, weblab_user.data)
 
     return response
