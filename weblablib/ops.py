@@ -9,6 +9,8 @@ import time
 import json
 import traceback
 
+from flask import g
+
 from weblablib.exc import NotFoundError
 from weblablib.utils import _current_weblab, _current_backend, _current_session_id
 from weblablib.users import ExpiredUser, CurrentUser, weblab_user, _set_weblab_user_cache
@@ -36,6 +38,14 @@ def status_time(session_id):
 
     return min(weblab.poll_interval, int(user.time_left))
 
+def store_initial_weblab_user_data():
+    session_id = _current_session_id()
+    if session_id:
+        backend = _current_backend()
+        current_user = backend.get_user(session_id)
+        if current_user.active:
+            g._initial_data = json.dumps(current_user.data)
+
 def update_weblab_user_data(response):
     # If a developer does:
     #
@@ -48,10 +58,11 @@ def update_weblab_user_data(response):
     backend = _current_backend()
     if session_id:
         if weblab_user.active:
-            current_user = backend.get_user(session_id)
-            if current_user.active:
-                if json.dumps(current_user.data) != json.dumps(weblab_user.data):
-                    backend.update_data(session_id, weblab_user.data)
+            # If there was no data in the beginning
+            # OR there was data in the beginning and now it is different,
+            # only then modify the current session
+            if not hasattr(g, '_initial_data') or g._initial_data != json.dumps(weblab_user.data):
+                backend.update_data(session_id, weblab_user.data)
 
     return response
 

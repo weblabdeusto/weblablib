@@ -75,7 +75,7 @@ from weblablib.users import WebLabUser, AnonymousUser, ExpiredUser, CurrentUser,
      get_weblab_user, weblab_user, socket_weblab_user, _set_weblab_user_cache
 from weblablib.backends import RedisManager
 from weblablib.tasks import WebLabTask, _TaskRunner, _TaskWrapper, current_task, current_task_stopping
-from weblablib.ops import status_time, update_weblab_user_data, dispose_user
+from weblablib.ops import status_time, update_weblab_user_data, store_initial_weblab_user_data, dispose_user
 from weblablib.views import weblab_blueprint
 
 try:
@@ -300,6 +300,7 @@ class WebLab(object):
             logout()
             return jsonify(success=True)
 
+        self._app.before_request(store_initial_weblab_user_data)
         self._app.after_request(update_weblab_user_data)
 
         #
