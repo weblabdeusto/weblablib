@@ -20,6 +20,7 @@ from weblablib.utils import create_token, _current_session_id, _current_weblab
 
 from weblablib.exc import AlreadyRunningError, TimeoutError
 
+
 class _TaskWrapper(object):
     def __init__(self, weblab, func, unique):
         self._func = func
@@ -43,7 +44,7 @@ class _TaskWrapper(object):
 
     def __call__(self, *args, **kwargs):
         """Runs the function in the same way, directly, without catching errors"""
-        session_id = None # only used if unique='user'
+        session_id = None  # only used if unique='user'
         if self._unique:
             if self._unique == 'global':
                 locked = self._backend.lock_global_unique_task(self._name)
@@ -64,8 +65,10 @@ class _TaskWrapper(object):
                     self._backend.unlock_user_unique_task(self._name, session_id)
 
     def delay(self, *args, **kwargs):
-        """Starts the function in a thread or in another process.
-        It returns a WebLabTask object"""
+        """
+        Starts the function in a thread or in another process.
+        It returns a WebLabTask object
+        """
         session_id = _current_session_id()
         task_id = self._backend.new_task(session_id, self._name, args, kwargs)
         return WebLabTask(self._weblab, task_id)
@@ -99,6 +102,7 @@ class _TaskWrapper(object):
         task_object = self.delay(*args, **kwargs)
         task_object.join(timeout=timeout, error_on_timeout=False)
         return task_object
+
 
 class WebLabTask(object):
     """
