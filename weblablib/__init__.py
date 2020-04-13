@@ -482,7 +482,7 @@ class WebLab(object):
         @click.option('--username', default='john.smith', help="Username passed")
         @click.option('--username-unique', default='john.smith@institution', help="Unique username passed")
         @click.option('--assigned-time', default=300, help="Time in seconds passed to the laboratory")
-        @click.option('--back', default='http://weblab.deusto.es', help="URL to send the user back")
+        @click.option('--back', default='https://developers.labsland.com/weblablib/en/stable/', help="URL to send the user back")
         @click.option('--locale', default='en', help="Language")
         @click.option('--experiment-name', default='mylab', help="Experiment name")
         @click.option('--category-name', default='Lab Experiments', help="Category name (of the experiment)")
