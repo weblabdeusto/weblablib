@@ -78,7 +78,8 @@ class _TaskWrapper(object):
                 return WebLabTask(self._weblab, task_id)
             time.sleep(0.1)
             # Sometimes this is happening. Verify this is not the problem.
-            print('[{}] Task id {} of session id {} not found.'.format(time.asctime(), task_id, session_id)
+            print('[{}] Task id {} of session id {} not found.'.format(time.asctime(), task_id, session_id))
+
         # Regardless, raise an error
         return WebLabTask(self._weblab, task_id)
 
