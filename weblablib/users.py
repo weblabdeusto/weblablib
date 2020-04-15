@@ -12,7 +12,8 @@ import warnings
 
 import six
 
-from werkzeug import ImmutableDict, LocalProxy
+from werkzeug.datastructures import ImmutableDict
+from werkzeug.local import LocalProxy
 from flask import g, current_app
 
 from weblablib.utils import create_token, _current_backend, _current_timestamp, \

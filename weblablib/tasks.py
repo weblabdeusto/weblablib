@@ -12,7 +12,8 @@ import traceback
 import six
 import redis
 
-from werkzeug import LocalProxy, ImmutableDict
+from werkzeug.local import LocalProxy
+from werkzeug.datastructures import ImmutableDict
 
 from flask import g
 
