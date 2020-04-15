@@ -71,6 +71,15 @@ class _TaskWrapper(object):
         """
         session_id = _current_session_id()
         task_id = self._backend.new_task(session_id, self._name, args, kwargs)
+        max_times = 5 # 0.5 seconds max.
+        for x in range(max_times):
+            task_data = self._backend.get_task(task_id)
+            if task_data:
+                return WebLabTask(self._weblab, task_id)
+            time.sleep(0.1)
+            # Sometimes this is happening. Verify this is not the problem.
+            print('[{}] Task id {} of session id {} not found.'.format(time.asctime(), task_id, session_id)
+        # Regardless, raise an error
         return WebLabTask(self._weblab, task_id)
 
     def run_sync(self, *args, **kwargs):

@@ -300,10 +300,6 @@ class RedisManager(object):
 
         # Register the new task atomically.
         pipeline = self.client.pipeline()
-        # Add the taskid into a set where we will store all ids.
-        pipeline.sadd('{}:weblab:{}:tasks'.format(self.key_base, session_id), task_id)
-        # Expire the whole set with task ids in a while. (~lrg: Is that really what we want to do?).
-        pipeline.expire('{}:weblab:{}:tasks'.format(self.key_base, session_id), self.task_expires)
         # Register the actual values for the task within a hashset with a task-specific key.
         pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'name', name)
         pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'session_id', session_id)
@@ -316,6 +312,12 @@ class RedisManager(object):
         pipeline.hset('{}:weblab:tasks:{}'.format(self.key_base, task_id), 'stopping', json.dumps(False))
         # Missing (normal): running. When created, we know if it's a new key and therefore that
         # no other thread is processing it.
+
+        # Add the taskid into a set where we will store all ids.
+        pipeline.sadd('{}:weblab:{}:tasks'.format(self.key_base, session_id), task_id)
+        # Expire the whole set with task ids in a while. (~lrg: Is that really what we want to do?).
+        pipeline.expire('{}:weblab:{}:tasks'.format(self.key_base, session_id), self.task_expires)
+
         pipeline.execute()
         return task_id
 
