@@ -5,6 +5,7 @@
 
 from __future__ import unicode_literals, print_function, division
 
+import sys
 import time
 import threading
 import traceback
@@ -77,9 +78,18 @@ class _TaskWrapper(object):
             task_data = self._backend.get_task(task_id)
             if task_data:
                 return WebLabTask(self._weblab, task_id)
-            time.sleep(0.1)
             # Sometimes this is happening. Verify this is not the problem.
             print('[{}] Task id {} of session id {} not found.'.format(time.asctime(), task_id, session_id))
+            print('[{}] Task id {} of session id {} not found.'.format(time.asctime(), task_id, session_id), file=sys.stderr)
+            all_task_ids = self._backend.get_all_tasks(session_id)
+            print('[{}] Task ids for session {}: {}.'.format(time.asctime(), session_id, all_task_ids))
+            print('[{}] Task ids for session {}: {}.'.format(time.asctime(), session_id, all_task_ids), file=sys.stderr)
+            unique_filename = '/tmp/{}-{}-{}.json'.format(session_id, x, time.time())
+            json_contents = json.dumps(dict(args=args, kwargs=kwargs), indent=4)
+            open(unique_filename, 'w').write(json_contents)
+            print('[{}] Arguments used for session {} stored at {}.'.format(time.asctime(), session_id, unique_filename), file=sys.stdout)
+            print('[{}] Arguments used for session {} stored at {}.'.format(time.asctime(), session_id, unique_filename), file=sys.stderr)
+            time.sleep(0.1)
 
         # Regardless, raise an error
         return WebLabTask(self._weblab, task_id)
