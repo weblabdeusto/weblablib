@@ -90,6 +90,8 @@ class _TaskWrapper(object):
             open(unique_filename, 'w').write(json_contents)
             print('[{}] Arguments used for session {} stored at {}.'.format(time.asctime(), session_id, unique_filename), file=sys.stdout)
             print('[{}] Arguments used for session {} stored at {}.'.format(time.asctime(), session_id, unique_filename), file=sys.stderr)
+            sys.stdout.flush()
+            sys.stderr.flush()
             time.sleep(0.1)
 
         # Regardless, raise an error
