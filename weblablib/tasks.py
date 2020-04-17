@@ -85,6 +85,7 @@ class _TaskWrapper(object):
             print('[{}] Task ids for session {}: {}.'.format(time.asctime(), session_id, all_task_ids))
             print('[{}] Task ids for session {}: {}.'.format(time.asctime(), session_id, all_task_ids), file=sys.stderr)
             unique_filename = '/tmp/{}-{}-{}.json'.format(session_id, x, time.time())
+            import json
             json_contents = json.dumps(dict(args=args, kwargs=kwargs), indent=4)
             open(unique_filename, 'w').write(json_contents)
             print('[{}] Arguments used for session {} stored at {}.'.format(time.asctime(), session_id, unique_filename), file=sys.stdout)
