@@ -1,11 +1,11 @@
-cssmin==0.2.0
-jsmin==2.2.2
-Flask==0.12.3
-Flask-Assets==0.12
-Flask-Babel==0.11.2
-Flask-DebugToolbar==0.10.1
-Flask-Redis==0.3.0
-Flask-SocketIO==2.9.2
-gevent==1.2.2
+cssmin
+jsmin
+Flask
+Flask-Assets
+Flask-Babel
+Flask-DebugToolbar
+Flask-Redis
+Flask-SocketIO
+gevent
 gunicorn
 
