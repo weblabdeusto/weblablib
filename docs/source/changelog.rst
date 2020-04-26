@@ -3,6 +3,30 @@
 Changelog
 =========
 
+Version 0.5.5
+-------------
+
+Link: https://developers.labsland.com/weblablib/en/0.5.5/
+Date: April 25th, 2020
+
+Changes
+^^^^^^^
+
+ * Fixed compatibility with Werkzeug >= 1.0.0
+ * Fixed a bug where sometimes the loop would delete the task before running
+ * Fixed a potential bug in creating task identifiers
+
+Version 0.5.4
+-------------
+
+Link: https://developers.labsland.com/weblablib/en/0.5.4/
+Date: August 26th, 2019
+
+Changes
+^^^^^^^
+
+ * Fixed bug when storing information in the initialization of a session
+
 Version 0.5.3
 -------------
 
