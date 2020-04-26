@@ -73,29 +73,31 @@ class _TaskWrapper(object):
         """
         session_id = _current_session_id()
         task_id = self._backend.new_task(session_id, self._name, args, kwargs)
-        max_times = 5 # 0.5 seconds max.
-        for x in range(max_times):
-            task_data = self._backend.get_task(task_id)
-            if task_data:
-                return WebLabTask(self._weblab, task_id)
-            # Sometimes this is happening. Verify this is not the problem.
-            print('[{}] Task id {} of session id {} not found.'.format(time.asctime(), task_id, session_id))
-            print('[{}] Task id {} of session id {} not found.'.format(time.asctime(), task_id, session_id), file=sys.stderr)
-            all_task_ids = self._backend.get_all_tasks(session_id)
-            print('[{}] Task ids for session {}: {}.'.format(time.asctime(), session_id, all_task_ids))
-            print('[{}] Task ids for session {}: {}.'.format(time.asctime(), session_id, all_task_ids), file=sys.stderr)
-            unique_filename = '/tmp/{}-{}-{}.json'.format(session_id, x, time.time())
-            import json
-            json_contents = json.dumps(dict(args=args, kwargs=kwargs), indent=4)
-            open(unique_filename, 'w').write(json_contents)
-            print('[{}] Arguments used for session {} stored at {}.'.format(time.asctime(), session_id, unique_filename), file=sys.stdout)
-            print('[{}] Arguments used for session {} stored at {}.'.format(time.asctime(), session_id, unique_filename), file=sys.stderr)
-            sys.stdout.flush()
-            sys.stderr.flush()
-            time.sleep(0.1)
-
-        # Regardless, raise an error
         return WebLabTask(self._weblab, task_id)
+
+#         max_times = 5 # 0.5 seconds max.
+#         for x in range(max_times):
+#             task_data = self._backend.get_task(task_id)
+#             if task_data:
+#                 return WebLabTask(self._weblab, task_id)
+#             # Sometimes this is happening. Verify this is not the problem.
+#             print('[{}] Task id {} of session id {} not found.'.format(time.asctime(), task_id, session_id))
+#             print('[{}] Task id {} of session id {} not found.'.format(time.asctime(), task_id, session_id), file=sys.stderr)
+#             all_task_ids = self._backend.get_all_tasks(session_id)
+#             print('[{}] Task ids for session {}: {}.'.format(time.asctime(), session_id, all_task_ids))
+#             print('[{}] Task ids for session {}: {}.'.format(time.asctime(), session_id, all_task_ids), file=sys.stderr)
+#             unique_filename = '/tmp/{}-{}-{}.json'.format(session_id, x, time.time())
+#             import json
+#             json_contents = json.dumps(dict(args=args, kwargs=kwargs), indent=4)
+#             open(unique_filename, 'w').write(json_contents)
+#             print('[{}] Arguments used for session {} stored at {}.'.format(time.asctime(), session_id, unique_filename), file=sys.stdout)
+#             print('[{}] Arguments used for session {} stored at {}.'.format(time.asctime(), session_id, unique_filename), file=sys.stderr)
+#             sys.stdout.flush()
+#             sys.stderr.flush()
+#             time.sleep(0.1)
+# 
+#         # Regardless, raise an error
+#         return WebLabTask(self._weblab, task_id)
 
     def run_sync(self, *args, **kwargs):
         """

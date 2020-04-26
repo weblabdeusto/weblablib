@@ -39,8 +39,6 @@ class RedisManager(object):
         self.weblab = weblab
         self.key_base = key_base  # Redis base prefix to use. It is *not* user or session specific.
 
-        # ~lrg: What is the lifecycle for the tasks? How is the expires() scheme meant to work?
-        # ~lrg: The expire time seems to depend on the config, and seems to be 3600 by default.
         self.task_expires = task_expires
 
     def add_user(self, session_id, user, expiration):
@@ -285,12 +283,10 @@ class RedisManager(object):
         task_id = create_token()
         while True:
             pipeline = self.client.pipeline()
-            pipeline.set('{}:weblab:task_ids:{}'.format(self.key_base, task_id), task_id)
+            pipeline.set('{}:weblab:task_ids:{}'.format(self.key_base, task_id), task_id, nx=True)
             pipeline.expire('{}:weblab:task_ids:{}'.format(self.key_base, task_id), self.task_expires)
             results = pipeline.execute()
 
-            # ~lrg: I am not sure that this actually works as expected, without previously setting the nx flag
-            # on the set() call.
             if results[0]:
                 # Ensure it's unique
                 break
@@ -315,9 +311,11 @@ class RedisManager(object):
 
         # Add the taskid into a set where we will store all ids.
         pipeline.sadd('{}:weblab:{}:tasks'.format(self.key_base, session_id), task_id)
-        # Expire the whole set with task ids in a while. (~lrg: Is that really what we want to do?).
         pipeline.expire('{}:weblab:{}:tasks'.format(self.key_base, session_id), self.task_expires)
 
+        # Only show these tasks when active is created
+        pipeline.set('{}:weblab:task_ids:active:{}'.format(self.key_base, task_id), task_id)
+        pipeline.expire('{}:weblab:task_ids:active:{}'.format(self.key_base, task_id), self.task_expires)
         pipeline.execute()
         return task_id
 
@@ -347,8 +345,8 @@ class RedisManager(object):
         self.client.delete('{}:weblab:user-unique-tasks:{}:{}'.format(self.key_base, task_name, session_id))
 
     def get_tasks_not_started(self):
-        task_ids = [key[len('{}:weblab:task_ids:'.format(self.key_base)):]
-                    for key in self.client.keys('{}:weblab:task_ids:*'.format(self.key_base))]
+        task_ids = [key[len('{}:weblab:task_ids:active:'.format(self.key_base)):]
+                    for key in self.client.keys('{}:weblab:task_ids:active:*'.format(self.key_base))]
 
         pipeline = self.client.pipeline()
         for task_id in task_ids:
@@ -503,4 +501,5 @@ class RedisManager(object):
         for task_id in task_ids:
             pipeline.delete('{}:weblab:tasks:{}'.format(self.key_base, task_id))
             pipeline.delete('{}:weblab:task_ids:{}'.format(self.key_base, task_id))
+            pipeline.delete('{}:weblab:task_ids:active:{}'.format(self.key_base, task_id))
         pipeline.execute()
