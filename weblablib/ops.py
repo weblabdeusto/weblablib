@@ -88,7 +88,7 @@ def dispose_user(session_id, waiting):
                         weblab._on_dispose()
                     except Exception:
                         traceback.print_exc()
-                    update_weblab_user_data(None)
+                    update_weblab_user_data(response=None)
             finally:
                 backend.finished_dispose(session_id)
 

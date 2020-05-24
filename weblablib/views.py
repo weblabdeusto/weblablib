@@ -6,6 +6,7 @@
 from __future__ import unicode_literals, print_function, division
 
 import json
+import time
 import datetime
 import traceback
 
@@ -154,7 +155,7 @@ def _process_start_request(request_data):
             if data:
                 user.data = data
             user.data.store_if_modified()
-            update_weblab_user_data(None)
+            update_weblab_user_data(response=None)
 
     link = url_for('weblab_callback_url', session_id=session_id, _external=True, **kwargs)
     return dict(url=link, session_id=session_id)
@@ -168,6 +169,42 @@ def _status(session_id):
     user.
     """
     return jsonify(should_finish=status_time(session_id))
+
+@weblab_blueprint.route('/sessions/status/multiple', methods=['POST'])
+def _multiple_status():
+    """
+    This method provides the current status of a bulk of
+    users.
+    """
+    t0 = time.time()
+
+    request_data = request.get_json(silent=True, force=True)
+    if request_data is None or request_data.get('session_ids') is None:
+        return jsonify(success=False, error_code='missing-parameters', error_human="session_ids expected in POST JSON")
+
+    # If the user passes a 'timeout' which is a float, calculate the
+    # future timeout, which is the moment when this method should stop
+    # processing requests.
+    try:
+        timeout = float(request_data.get('timeout'))
+        future_timeout = t0 + timeout
+        if future_timeout <= t0:
+            future_timeout = None
+    except:
+        future_timeout = None
+
+    status = {
+        # session_id: status
+    }
+
+    for session_id in request_data['session_ids']:
+        status[session_id] = status_time(session_id)
+
+        if future_timeout is not None and time.time() > future_timeout:
+            # Do not process more requests, timeout happened
+            break
+
+    return jsonify(status=status)
 
 
 @weblab_blueprint.route('/sessions/<session_id>', methods=['POST'])

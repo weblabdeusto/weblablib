@@ -3,6 +3,17 @@
 Changelog
 =========
 
+Version 0.5.6
+-------------
+
+Link: https://developers.labsland.com/weblablib/en/0.5.6/
+Date: May 23rd, 2020
+
+Changes
+^^^^^^^
+
+ * Support for bulk operation that obtains multiple reservations at the same time
+
 Version 0.5.5
 -------------
 
