@@ -98,7 +98,7 @@ __all__ = ['WebLab',
            'AlreadyRunningError', 'CurrentUser', 'AnonymousUser',
            'ExpiredUser']
 
-__version__ = '0.5.6'
+__version__ = '0.5.7'
 __license__ = 'GNU Affero General Public License v3 http://www.gnu.org/licenses/agpl.html'
 
 
@@ -232,6 +232,7 @@ class WebLab(object):
         self._session_id_name = self._app.config.get(ConfigurationKeys.WEBLAB_SESSION_ID_NAME, 'weblab_session_id')
         self.timeout = self._app.config.get(ConfigurationKeys.WEBLAB_TIMEOUT, 15)
         self.poll_interval = self._app.config.get(ConfigurationKeys.WEBLAB_POLL_INTERVAL, 5)
+        self.cleaner_thread_interval = self._app.config.get(ConfigurationKeys.WEBLAB_CLEANER_INTERVAL, 5)
         autopoll = self._app.config.get(ConfigurationKeys.WEBLAB_AUTOPOLL, True)
         self._redirection_on_forbiden = self._app.config.get(ConfigurationKeys.WEBLAB_UNAUTHORIZED_LINK)
         self._template_on_forbiden = self._app.config.get(ConfigurationKeys.WEBLAB_UNAUTHORIZED_TEMPLATE)
@@ -614,8 +615,9 @@ class WebLab(object):
 
         else:
             if self._app.config.get('WEBLAB_AUTOCLEAN_THREAD', True):
-                self._cleaner_thread = _CleanerThread(self, self._app)
-                self._cleaner_thread.start()
+                self._cleaner_thread = _CleanerThread.create(self, self._app)
+                if self._cleaner_thread is not None:
+                    self._cleaner_thread.start()
 
             threads_per_process = self._app.config.get('WEBLAB_TASK_THREADS_PROCESS', 3)
             if threads_per_process > 0: # If set to 0, no thread is running
@@ -1087,7 +1089,8 @@ class WebLab(object):
             loop_threads.append(task_thread)
             task_thread.start()
 
-            cleaner_thread = _CleanerThread(weblab=self, app=self._app, n=number)
+        cleaner_thread = _CleanerThread.create(weblab=self, app=self._app)
+        if cleaner_thread is not None:
             loop_threads.append(cleaner_thread)
             cleaner_thread.start()
 
@@ -1233,14 +1236,28 @@ class _CleanerThread(threading.Thread):
     """
 
     _instances = []
+    _last_instance = 0
+    _created = False
 
-    def __init__(self, weblab, app, n=1):
+    def __init__(self, weblab, app, n=None):
         super(_CleanerThread, self).__init__()
+        _CleanerThread._created = True
+        _CleanerThread._last_instance += 1
+        if n is None:
+            n = _CleanerThread._last_instance
         self.app = app
         self.name = "WebLabCleaner-{}".format(n)
         self.weblab = weblab
         self.daemon = True
         self._stopping = False
+
+    @staticmethod
+    def create(weblab, app):
+        if _CleanerThread._created:
+            return None # already created
+
+        return _CleanerThread(weblab, app)
+
 
     def stop(self):
         self._stopping = True

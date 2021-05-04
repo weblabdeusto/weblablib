@@ -216,16 +216,31 @@ class RedisManager(object):
 
         for active_key in self.client.keys('{}:weblab:active:*'.format(self.key_base)):
             session_id = active_key[len('{}:weblab:active:'.format(self.key_base)):]
-            user = self.get_user(session_id)
-            if isinstance(user, CurrentUser): # Double check: he might be deleted in the meanwhile
+
+            session_id_key = '{}:weblab:active:{}'.format(self.key_base, session_id)
+
+            pipeline = self.client.pipeline()
+            pipeline.hget(session_id_key, 'max_date')
+            pipeline.hget(session_id_key, 'last_poll')
+            pipeline.hget(session_id_key, 'exited')
+
+            max_date, last_poll, exited = pipeline.execute()
+
+            if max_date is not None and last_poll is not None: 
+                # Double check: he might be deleted in the meanwhile
                 # We don't use 'active', since active takes into account 'exited'
-                if user.time_left <= 0:
+
+                time_left = float(max_date) - _current_timestamp()
+                time_without_polling = _current_timestamp() - float(last_poll)
+                user_exited = exited in ('true', '1', 'True', 'TRUE')
+
+                if time_left <= 0:
                     expired_sessions.append(session_id)
 
-                elif user.time_without_polling >= self.weblab.timeout:
+                elif time_without_polling >= self.weblab.timeout:
                     expired_sessions.append(session_id)
 
-                elif user.exited:
+                elif user_exited:
                     expired_sessions.append(session_id)
 
         return expired_sessions

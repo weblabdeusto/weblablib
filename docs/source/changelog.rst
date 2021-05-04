@@ -3,6 +3,17 @@
 Changelog
 =========
 
+Version 0.5.7
+-------------
+
+Link: https://developers.labsland.com/weblablib/en/0.5.7/
+Date: May 3rd, 2021
+
+Changes
+^^^^^^^
+
+ * Improve the automatic cleaner process: it runs less threads and consumes significant less bandwidth from Redis
+
 Version 0.5.6
 -------------
 

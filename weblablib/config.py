@@ -81,6 +81,12 @@ class ConfigurationKeys(object):
     # not ask again and will wait until the end of the cycle.
     WEBLAB_POLL_INTERVAL = 'WEBLAB_POLL_INTERVAL'
 
+    # There is a thread that cleans expired sessions. If a user has been more time that it 
+    # should be possible, the user will be kicked out even if WebLab-Deusto has not checked
+    # yet. This is important so that if the dispose() method takes a while (e.g., deleting
+    # things, etc.), we call it asap.
+    WEBLAB_CLEANER_INTERVAL = 'WEBLAB_CLEANER_INTERVAL'
+
     # Force 'http' or 'https'
     WEBLAB_SCHEME = 'WEBLAB_SCHEME'
 

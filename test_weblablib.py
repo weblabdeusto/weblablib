@@ -63,6 +63,7 @@ class BaseWebLabTest(unittest.TestCase):
         }
 
     def create_weblab(self):
+        weblablib._CleanerThread.created = False
         self.weblab = weblablib.WebLab()
         self.app = Flask(__name__)
         flask_cli.locate_app = lambda *args: self.app
