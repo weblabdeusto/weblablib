@@ -113,3 +113,7 @@ class ConfigurationKeys(object):
 
     # Equivalent for WEBLAB_AUTOCLEAN_THREAD=False and WEBLAB_TASK_THREADS_PROCESS=0
     WEBLAB_NO_THREAD = 'WEBLAB_NO_THREAD'
+
+    # Emit structured logs for normal session lifecycle transitions and
+    # protected-route rejections. Defaults to True.
+    WEBLAB_LOG_SESSION_LIFECYCLE = 'WEBLAB_LOG_SESSION_LIFECYCLE'

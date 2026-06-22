@@ -76,6 +76,7 @@ from weblablib.users import WebLabUser, AnonymousUser, ExpiredUser, CurrentUser,
 from weblablib.backends import RedisManager
 from weblablib.tasks import WebLabTask, _TaskRunner, _TaskWrapper, current_task, current_task_stopping
 from weblablib.ops import status_time, update_weblab_user_data, store_initial_weblab_user_data, dispose_user
+from weblablib.session_lifecycle import emit_protected_request_rejected
 from weblablib.views import weblab_blueprint
 
 try:
@@ -98,7 +99,7 @@ __all__ = ['WebLab',
            'AlreadyRunningError', 'CurrentUser', 'AnonymousUser',
            'ExpiredUser']
 
-__version__ = '0.5.7'
+__version__ = '0.5.8'
 __license__ = 'GNU Affero General Public License v3 http://www.gnu.org/licenses/agpl.html'
 
 
@@ -1164,11 +1165,17 @@ def requires_active(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not weblab_user.active:
+            weblab = _current_weblab()
             if weblab_user.is_anonymous:
                 # If anonymous user: forbidden
-                return _current_weblab()._forbidden_handler()
+                response = weblab._forbidden_handler()
+                status = getattr(response, 'status_code', 403)
+                emit_protected_request_rejected(weblab_user, status, weblab=weblab)
+                return response
             # If expired: send back to the original URL
-            return redirect(weblab_user.back)
+            response = redirect(weblab_user.back)
+            emit_protected_request_rejected(weblab_user, response.status_code, weblab=weblab)
+            return response
         return func(*args, **kwargs)
     return wrapper
 

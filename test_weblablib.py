@@ -43,6 +43,36 @@ class StdWrap(object):
         sys.stdout = self.sysout
         sys.stderr = self.syserr
 
+class LifecycleLogCapture(object):
+    def __init__(self, app):
+        self.app = app
+        self.messages = []
+
+    def __enter__(self):
+        self.old_info = self.app.logger.info
+        self.app.logger.info = self.info
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        self.app.logger.info = self.old_info
+
+    def info(self, message, *args, **kwargs):
+        if args:
+            message = message % args
+        self.messages.append(message)
+
+    @property
+    def events(self):
+        events = []
+        for message in self.messages:
+            try:
+                data = json.loads(message)
+            except ValueError:
+                continue
+            if data.get('event') == 'weblab_session_lifecycle':
+                events.append(data)
+        return events
+
 class WithoutWebLabTest(unittest.TestCase):
     def test_extension(self):
         app = Flask(__name__)
@@ -234,8 +264,20 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
 
     def test_anonymous_on_active(self):
         with self.app.test_client() as client:
-            rv = client.get('/lab/active')
+            with LifecycleLogCapture(self.app) as logs:
+                rv = client.get('/lab/active')
             self.assertIn("forbidden", self.get_text(rv))
+            self.assertEquals(len(logs.events), 1)
+            event = logs.events[0]
+            self.assertEquals(event['action'], 'protected_request_rejected')
+            self.assertEquals(event['reason'], 'anonymous_no_session_cookie')
+            self.assertEquals(event['status'], 403)
+            self.assertEquals(event['path'], '/lab/active')
+            self.assertEquals(event['method'], 'GET')
+            self.assertIsNone(event['session_id_hash'])
+            self.assertNotIn('username', event)
+            self.assertNotIn('full_name', event)
+            self.assertNotIn('back', event)
 
     def test_poll_url(self):
         with self.app.test_client() as client:
@@ -298,6 +340,19 @@ class SimpleNoTimeoutUnauthenticatedTest(BaseWebLabTest):
             client.get('/lab/')
             result = render_template_string("{{ weblab_poll_script() }}")
             self.assertIn('timeout is 0', result)
+
+class LifecycleLoggingDisabledTest(BaseWebLabTest):
+    def get_config(self):
+        config = super(LifecycleLoggingDisabledTest, self).get_config()
+        config['WEBLAB_LOG_SESSION_LIFECYCLE'] = False
+        return config
+
+    def test_anonymous_rejection_does_not_log_when_disabled(self):
+        with self.app.test_client() as client:
+            with LifecycleLogCapture(self.app) as logs:
+                rv = client.get('/lab/active')
+        self.assertIn("forbidden", self.get_text(rv))
+        self.assertEquals(logs.events, [])
 
 class UnauthorizedLinkSimpleTest(BaseWebLabTest):
     def get_config(self):
@@ -620,6 +675,74 @@ class UserTest(BaseSessionWebLabTest):
         self.assertEquals(weblablib.weblab_user.category_name, 'Lab experiments')
         self.assertEquals(weblablib.weblab_user.experiment_id, 'mylab@Lab experiments')
 
+    def test_expired_known_user_rejection_logs_redirect(self):
+        launch_url1, session_id1 = self.new_user()
+        self.client.get(launch_url1, follow_redirects=True)
+        self.client.get('/logout')
+
+        with LifecycleLogCapture(self.app) as logs:
+            rv = self.client.get('/lab/active')
+
+        self.assertEquals(rv.status_code, 302)
+        self.assertEquals(rv.location, 'http://weblab.deusto.es')
+        self.assertEquals(len(logs.events), 1)
+        event = logs.events[0]
+        self.assertEquals(event['action'], 'protected_request_rejected')
+        self.assertEquals(event['reason'], 'user_exited')
+        self.assertEquals(event['status'], 302)
+        self.assertEquals(event['path'], '/lab/active')
+        self.assertEquals(event['method'], 'GET')
+        self.assertEquals(event['experiment_name'], 'mylab')
+        self.assertEquals(event['category_name'], 'Lab experiments')
+        self.assertTrue(event['session_id_hash'])
+        self.assertNotIn(session_id1, json.dumps(event))
+        self.assertNotIn('jim.smith', json.dumps(event))
+        self.assertNotIn('Jim Smith', json.dumps(event))
+        self.assertNotIn('http://weblab.deusto.es', json.dumps(event))
+
+    def test_status_time_left_passed_logs_expiry_once(self):
+        launch_url1, session_id1 = self.new_user(assigned_time=0.1)
+        self.client.get(launch_url1, follow_redirects=True)
+        time.sleep(0.2)
+
+        with LifecycleLogCapture(self.app) as logs:
+            self.assertEquals(self.status()['should_finish'], -1)
+            self.assertEquals(self.status()['should_finish'], -1)
+
+        events = logs.events
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0]['action'], 'expiry_detected')
+        self.assertEquals(events[0]['reason'], 'time_limit_reached')
+        self.assertEquals(events[0]['source'], 'status_time')
+        self.assertTrue(events[0]['session_id_hash'])
+
+    def test_status_timeout_logs_expiry_once(self):
+        self.weblab.timeout = 0.1
+        launch_url1, session_id1 = self.new_user()
+        self.client.get(launch_url1, follow_redirects=True)
+        time.sleep(0.2)
+
+        with LifecycleLogCapture(self.app) as logs:
+            self.assertEquals(self.status()['should_finish'], -1)
+            self.assertEquals(self.status()['should_finish'], -1)
+
+        events = logs.events
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0]['action'], 'expiry_detected')
+        self.assertEquals(events[0]['reason'], 'inactivity_timeout')
+
+    def test_logout_status_logs_user_exited_expiry(self):
+        launch_url1, session_id1 = self.new_user()
+        self.client.get(launch_url1, follow_redirects=True)
+        self.client.get('/logout')
+
+        with LifecycleLogCapture(self.app) as logs:
+            self.assertEquals(self.status()['should_finish'], -1)
+
+        self.assertEquals(len(logs.events), 1)
+        self.assertEquals(logs.events[0]['action'], 'expiry_detected')
+        self.assertEquals(logs.events[0]['reason'], 'user_exited')
+
     def test_status_concrete_time_left_without_timestamp(self):
         # New user, with 3 seconds
         launch_url1, session_id1 = self.new_user(assigned_time=3, use_timestamp=False)
@@ -676,6 +799,24 @@ class UserTest(BaseSessionWebLabTest):
 
         # time passed
         self.assertEquals(should_finish, -1)
+
+class LifecycleSessionTest(BaseSessionWebLabTest):
+    def lab(self):
+        return ":-)"
+
+    def test_dispose_logs_when_session_moves_inactive(self):
+        launch_url1, session_id1 = self.new_user()
+        self.client.get(launch_url1, follow_redirects=True)
+
+        with LifecycleLogCapture(self.app) as logs:
+            result = self.dispose()
+
+        self.assertEquals(result['message'], 'Deleted')
+        events = logs.events
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0]['action'], 'disposed')
+        self.assertEquals(events[0]['reason'], 'unknown_expiry')
+        self.assertEquals(events[0]['source'], 'dispose_user')
 
 class TaskFailTest(BaseSessionWebLabTest):
 
@@ -1519,4 +1660,3 @@ class WebLabSetupErrorsTest(unittest.TestCase):
 
 def _to_timestamp(dtime):
     return str(int(time.mktime(dtime.timetuple()))) + str(dtime.microsecond / 1e6)[1:]
-

@@ -79,6 +79,11 @@ class RedisManager(object):
     def report_session_deleted(self, session_id):
         self.client.delete('{}:weblab:sessions:{}'.format(self.key_base, session_id))
 
+    def mark_session_lifecycle_event_once(self, session_id, action):
+        expiration = current_app.config.get(ConfigurationKeys.WEBLAB_EXPIRED_USERS_TIMEOUT, 3600)
+        key = '{}:weblab:lifecycle:{}:{}'.format(self.key_base, action, session_id)
+        return bool(self.client.set(key, '1', ex=expiration, nx=True))
+
     def update_data(self, session_id, data):
         key_active = '{}:weblab:active:{}'.format(self.key_base, session_id)
         key_inactive = '{}:weblab:inactive:{}'.format(self.key_base, session_id)

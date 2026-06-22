@@ -14,6 +14,7 @@ from flask import g
 from weblablib.exc import NotFoundError
 from weblablib.utils import _current_weblab, _current_backend, _current_session_id
 from weblablib.users import ExpiredUser, CurrentUser, weblab_user, _set_weblab_user_cache
+from weblablib.session_lifecycle import emit_expiry_detected, emit_session_disposed
 
 def status_time(session_id):
     weblab = _current_weblab()
@@ -26,15 +27,18 @@ def status_time(session_id):
         return -1
 
     if user.exited:
+        emit_expiry_detected(user, weblab=weblab, source='status_time', reason='user_exited')
+        return -1
+
+    if user.time_left <= 0:
+        emit_expiry_detected(user, weblab=weblab, source='status_time', reason='time_limit_reached')
         return -1
 
     if weblab.timeout and weblab.timeout > 0:
         # If timeout is set to -1, it will never timeout (unless user exited)
         if user.time_without_polling >= weblab.timeout:
+            emit_expiry_detected(user, weblab=weblab, source='status_time', reason='inactivity_timeout')
             return -1
-
-    if user.time_left <= 0:
-        return -1
 
     return min(weblab.poll_interval, int(user.time_left))
 
@@ -78,8 +82,9 @@ def dispose_user(session_id, waiting):
         deleted = backend.delete_user(session_id, current_expired_user)
 
         if deleted:
+            weblab = _current_weblab()
+            emit_session_disposed(user, weblab=weblab, source='dispose_user')
             try:
-                weblab = _current_weblab()
                 weblab._set_session_id(session_id)
                 if weblab._on_dispose:
 
