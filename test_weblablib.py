@@ -715,6 +715,7 @@ class UserTest(BaseSessionWebLabTest):
         self.assertEquals(events[0]['reason'], 'time_limit_reached')
         self.assertEquals(events[0]['source'], 'status_time')
         self.assertTrue(events[0]['session_id_hash'])
+        self.assertNotIn(session_id1, json.dumps(events[0]))
 
     def test_status_timeout_logs_expiry_once(self):
         self.weblab.timeout = 0.1
@@ -817,6 +818,7 @@ class LifecycleSessionTest(BaseSessionWebLabTest):
         self.assertEquals(events[0]['action'], 'disposed')
         self.assertEquals(events[0]['reason'], 'unknown_expiry')
         self.assertEquals(events[0]['source'], 'dispose_user')
+        self.assertNotIn(session_id1, json.dumps(events[0]))
 
 class TaskFailTest(BaseSessionWebLabTest):
 

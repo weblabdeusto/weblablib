@@ -62,8 +62,10 @@ def _session_id_hash(session_id):
 def _request_fields(status):
     if not has_request_context():
         return {}
+    url_rule = getattr(request, 'url_rule', None)
+    path = getattr(url_rule, 'rule', None) or request.path
     return {
-        'path': request.path,
+        'path': path,
         'endpoint': request.endpoint,
         'method': request.method,
         'status': status,
