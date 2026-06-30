@@ -1,4 +1,4 @@
-python-socketio==3.1.1
+python-socketio==5.16.2
 redis
 flask
 six
