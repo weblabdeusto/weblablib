@@ -2,6 +2,7 @@ from __future__ import unicode_literals, print_function, division
 
 import json
 import os
+import threading
 import unittest
 import uuid
 
@@ -9,7 +10,6 @@ import redis
 from flask import Flask
 
 import weblablib
-import weblablib.backends.redis_manager as redis_manager_module
 from weblablib.backends.redis_manager import RedisManager
 from weblablib.exc import AlreadyRunningError, InvalidConfigError
 
@@ -277,20 +277,25 @@ class RedisIndexConfigurationTest(BaseRedisIndexTest):
             manager._preflight_redis_index()
         self.assertIn('configured index mode', str(context.exception))
 
-    def test_preflight_uses_an_isolated_set_command_probe(self):
+    def test_preflight_uses_isolated_set_string_and_hash_command_probes(self):
         manager = self.manager()
         original_pipeline = self.client.pipeline
 
-        def pipeline():
-            def mutate(results):
-                results[2] = set()
-            return PipelineResultProxy(original_pipeline(), mutate)
+        cases = (
+            (2, set(), 'Redis set command probe failed'),
+            (5, [], 'Redis string command probe failed'),
+            (8, [], 'Redis hash command probe failed'),
+        )
+        for result_index, replacement, expected_message in cases:
+            def pipeline(result_index=result_index, replacement=replacement):
+                def mutate(results):
+                    results[result_index] = replacement
+                return PipelineResultProxy(original_pipeline(), mutate)
 
-        manager.client = ClientProxy(self.client, pipeline=pipeline)
-        with self.assertRaises(InvalidConfigError) as context:
-            manager._preflight_redis_index()
-        self.assertEqual(str(context.exception),
-                         'Redis set command probe failed')
+            manager.client = ClientProxy(self.client, pipeline=pipeline)
+            with self.assertRaises(InvalidConfigError) as context:
+                manager._preflight_redis_index()
+            self.assertEqual(str(context.exception), expected_message)
         self.assertEqual(self.client.keys(
             '{}:weblab:index:v1:command-probe:*'.format(self.key_base)), [])
 
@@ -478,7 +483,7 @@ class RedisIndexMigrationTest(BaseRedisIndexTest):
         self.assertFalse(status['ok'])
         self.assertIn('ResponseError', status['errors'])
 
-    def test_prepare_reconciles_indices_and_sets_readiness(self):
+    def test_prepare_backfills_live_members_and_defers_safe_stale_pruning(self):
         shadow = self.manager('shadow', 'epoch-1')
         self.seed_session('session')
         self.seed_task('pending')
@@ -491,13 +496,20 @@ class RedisIndexMigrationTest(BaseRedisIndexTest):
         self.assertTrue(result['ready'])
         self.assertEqual(result['ready_epoch'], 'epoch-1')
         self.assertEqual(result['active_sessions']['missing'], 0)
-        self.assertEqual(result['active_sessions']['stale'], 0)
+        self.assertEqual(result['active_sessions']['stale'], 1)
         self.assertEqual(result['pending_tasks']['missing'], 0)
-        self.assertEqual(result['pending_tasks']['stale'], 0)
+        self.assertEqual(result['pending_tasks']['stale'], 1)
         self.assertEqual(self.client.smembers(self.active_index_key),
-                         set([INDEX_SENTINEL, 'session']))
+                         set([INDEX_SENTINEL, 'session', 'stale-session']))
         self.assertEqual(self.client.smembers(self.pending_index_key),
-                         set([INDEX_SENTINEL, 'pending']))
+                         set([INDEX_SENTINEL, 'pending', 'stale-task']))
+
+        indexed = self.manager('indexed', 'epoch-1')
+        self.assertEqual(indexed.find_expired_sessions(), ['session'])
+        self.assertEqual(indexed.get_tasks_not_started(), ['pending'])
+        final_status = indexed.redis_index_status(scan_count=10)
+        self.assertEqual(final_status['active_sessions']['stale'], 0)
+        self.assertEqual(final_status['pending_tasks']['stale'], 0)
 
     def test_prepare_requires_shadow_and_honors_per_base_lock(self):
         with self.assertRaises(InvalidConfigError):
@@ -598,6 +610,71 @@ class RedisIndexMigrationTest(BaseRedisIndexTest):
         self.assertEqual(shadow.client.pipeline_calls, 2)
         self.assertFalse(self.client.exists(self.lock_key))
 
+    def test_concurrent_prepare_has_one_lock_owner(self):
+        first = self.manager('shadow', 'epoch-1')
+        second = self.manager('shadow', 'epoch-1')
+        entered = threading.Event()
+        release = threading.Event()
+        result = []
+        errors = []
+        original_reconcile = first._reconcile_redis_indices
+
+        def blocking_reconcile(scan_count):
+            entered.set()
+            release.wait(5)
+            return original_reconcile(scan_count)
+
+        def prepare_first():
+            try:
+                result.append(first.prepare_redis_index(scan_count=10))
+            except Exception as error:
+                errors.append(error)
+
+        first._reconcile_redis_indices = blocking_reconcile
+        thread = threading.Thread(target=prepare_first)
+        thread.start()
+        self.assertTrue(entered.wait(5))
+        try:
+            with self.assertRaises(AlreadyRunningError):
+                second.prepare_redis_index(scan_count=10)
+        finally:
+            release.set()
+            thread.join(5)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(len(result), 1)
+        self.assertTrue(result[0]['ready'])
+
+    def test_prepare_remains_complete_during_concurrent_shadow_writes(self):
+        shadow = self.manager('shadow', 'epoch-1')
+        started = threading.Event()
+        stop = threading.Event()
+        created = []
+
+        def writer():
+            while not stop.is_set() and len(created) < 500:
+                task_id = shadow.new_task('session', 'task', [], {})
+                created.append(task_id)
+                started.set()
+
+        thread = threading.Thread(target=writer)
+        thread.start()
+        self.assertTrue(started.wait(5))
+        try:
+            status = shadow.prepare_redis_index(scan_count=25)
+        finally:
+            stop.set()
+            thread.join(5)
+
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(status['ready'])
+        final_status = shadow.redis_index_status(scan_count=25)
+        self.assertTrue(final_status['ready'])
+        self.assertEqual(final_status['pending_tasks']['missing'], 0)
+        self.assertEqual(final_status['pending_tasks']['stale'], 0)
+        self.assertEqual(final_status['pending_tasks']['expected'], len(created))
+
 
 class RedisIndexedReadTest(BaseRedisIndexTest):
     def setUp(self):
@@ -641,6 +718,46 @@ class RedisIndexedReadTest(BaseRedisIndexTest):
         self.assertNotIn('running', members)
         self.assertNotIn('expired-marker', members)
         self.assertNotIn('ghost', members)
+
+    def test_indexed_task_validation_batches_markers_and_hash_fields(self):
+        for number in range(25):
+            self.seed_task('task-{}'.format(number))
+        manager = self.indexed_manager()
+
+        manager.client.config_resetstat()
+        self.assertEqual(len(manager.get_tasks_not_started()), 25)
+        stats = manager.client.info('commandstats')
+
+        self.assertEqual(stats.get('cmdstat_keys', {}).get('calls', 0), 0)
+        self.assertEqual(stats.get('cmdstat_exists', {}).get('calls', 0), 0)
+        self.assertEqual(stats['cmdstat_mget']['calls'], 1)
+        self.assertEqual(stats['cmdstat_hmget']['calls'], 25)
+
+    def test_malformed_task_hash_is_not_a_runnable_index_candidate(self):
+        manager = self.indexed_manager()
+        marker_key = '{}:weblab:task_ids:active:malformed'.format(
+            self.key_base)
+        task_key = '{}:weblab:tasks:malformed'.format(self.key_base)
+        self.client.set(marker_key, 'malformed')
+        self.client.hset(task_key, 'unexpected-field', 'value')
+        self.client.sadd(self.pending_index_key, 'malformed')
+
+        self.assertEqual(manager.get_tasks_not_started(), [])
+        self.assertNotIn('malformed',
+                         self.client.smembers(self.pending_index_key))
+
+    def test_wrong_type_legacy_marker_uses_compatible_existence_fallback(self):
+        manager = self.indexed_manager()
+        marker_key = '{}:weblab:task_ids:active:wrong-marker'.format(
+            self.key_base)
+        self.client.hset(marker_key, 'unexpected-field', 'value')
+        self.seed_task('wrong-marker', marker=False)
+        self.client.sadd(self.pending_index_key, 'wrong-marker')
+
+        self.assertEqual(manager.get_tasks_not_started(), ['wrong-marker'])
+        self.assertEqual(len(self.logger.warning_messages), 1)
+        self.assertIn('marker_validation_fallback',
+                      self.logger.warning_messages[0])
 
     def test_marker_expiry_is_authoritative_and_prunes_pending_member(self):
         manager = self.indexed_manager()

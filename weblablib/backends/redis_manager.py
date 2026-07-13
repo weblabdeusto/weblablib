@@ -138,15 +138,26 @@ class RedisManager(object):
 
             probe_key = '{}:weblab:index:v1:command-probe:{}'.format(
                 self.key_base, create_token())
+            string_probe_key = '{}:string'.format(probe_key)
+            hash_probe_key = '{}:hash'.format(probe_key)
             pipeline = self.client.pipeline()
             pipeline.sadd(probe_key, REDIS_INDEX_PROBE_MEMBER)
             pipeline.expire(probe_key, 60)
             pipeline.smembers(probe_key)
             pipeline.srem(probe_key, REDIS_INDEX_PROBE_MEMBER)
-            pipeline.delete(probe_key)
+            pipeline.set(string_probe_key, REDIS_INDEX_PROBE_MEMBER, ex=60)
+            pipeline.mget([string_probe_key])
+            pipeline.hset(hash_probe_key, 'name', REDIS_INDEX_PROBE_MEMBER)
+            pipeline.expire(hash_probe_key, 60)
+            pipeline.hmget(hash_probe_key, 'name', 'running')
+            pipeline.delete(probe_key, string_probe_key, hash_probe_key)
             results = pipeline.execute()
             if REDIS_INDEX_PROBE_MEMBER not in results[2]:
                 raise InvalidConfigError('Redis set command probe failed')
+            if results[5] != [REDIS_INDEX_PROBE_MEMBER]:
+                raise InvalidConfigError('Redis string command probe failed')
+            if results[8] != [REDIS_INDEX_PROBE_MEMBER, None]:
+                raise InvalidConfigError('Redis hash command probe failed')
 
             if self.index_mode == 'shadow' and ready_epoch is None:
                 pipeline = self.client.pipeline()
@@ -204,22 +215,56 @@ class RedisManager(object):
     def _expected_pending_task_ids(self, scan_count):
         marker_prefix = '{}:weblab:task_ids:active:'.format(self.key_base)
         task_ids = self._scan_ids(marker_prefix, scan_count)
-        pipeline = self.client.pipeline()
+        pending, _ = self._classify_pending_task_ids(task_ids)
+        return set(pending)
+
+    def _classify_pending_task_ids(self, task_ids):
+        task_ids = list(task_ids)
+        if not task_ids:
+            return [], []
+
+        marker_keys = [
+            '{}:weblab:task_ids:active:{}'.format(self.key_base, task_id)
+            for task_id in task_ids]
+        pipeline = self.client.pipeline(transaction=False)
+        pipeline.mget(marker_keys)
         for task_id in task_ids:
-            pipeline.exists('{}{}'.format(marker_prefix, task_id))
             task_key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
-            pipeline.exists(task_key)
-            pipeline.hget(task_key, 'running')
+            pipeline.hmget(task_key, 'name', 'running')
         values = pipeline.execute()
 
-        expected = set()
-        for index, task_id in enumerate(task_ids):
-            marker_exists = values[index * 3]
-            task_exists = values[index * 3 + 1]
-            running = values[index * 3 + 2]
-            if marker_exists and task_exists and not running:
-                expected.add(task_id)
-        return expected
+        marker_values = values[0]
+        task_values = values[1:]
+        missing_marker_indices = [
+            index for index, marker_value in enumerate(marker_values)
+            if marker_value is None]
+        if missing_marker_indices:
+            pipeline = self.client.pipeline(transaction=False)
+            for index in missing_marker_indices:
+                pipeline.exists(marker_keys[index])
+            existence_values = pipeline.execute()
+            wrong_type_count = 0
+            for index, marker_exists in zip(
+                    missing_marker_indices, existence_values):
+                if marker_exists:
+                    marker_values[index] = True
+                    wrong_type_count += 1
+            if wrong_type_count:
+                self._emit_index_event(
+                    'warning', 'marker_validation_fallback', 'pending_tasks',
+                    reason='non_string_marker',
+                    member_count=wrong_type_count)
+
+        pending = []
+        stale = []
+        for task_id, marker_value, task_value in zip(
+                task_ids, marker_values, task_values):
+            name, running = task_value
+            if marker_value is not None and name is not None and not running:
+                pending.append(task_id)
+            else:
+                stale.append(task_id)
+        return pending, stale
 
     def _read_index_set(self, key, errors):
         try:
@@ -327,12 +372,8 @@ class RedisManager(object):
         pipeline.sadd(self._pending_tasks_index_key, REDIS_INDEX_SENTINEL)
         self._queue_set_members(pipeline, 'sadd', self._active_sessions_index_key,
                                 expected_active - indexed_active, scan_count)
-        self._queue_set_members(pipeline, 'srem', self._active_sessions_index_key,
-                                indexed_active - expected_active, scan_count)
         self._queue_set_members(pipeline, 'sadd', self._pending_tasks_index_key,
                                 expected_pending - indexed_pending, scan_count)
-        self._queue_set_members(pipeline, 'srem', self._pending_tasks_index_key,
-                                indexed_pending - expected_pending, scan_count)
         pipeline.execute()
 
     def _release_index_lock(self, token):
@@ -378,9 +419,7 @@ class RedisManager(object):
                 status = self.redis_index_status(scan_count)
                 if (status['ok'] and
                         status['active_sessions']['missing'] == 0 and
-                        status['active_sessions']['stale'] == 0 and
-                        status['pending_tasks']['missing'] == 0 and
-                        status['pending_tasks']['stale'] == 0):
+                        status['pending_tasks']['missing'] == 0):
                     break
             else:
                 raise InvalidConfigError(
@@ -868,26 +907,7 @@ class RedisManager(object):
         return not_started
 
     def _indexed_tasks_not_started(self, task_ids):
-        pipeline = self.client.pipeline()
-        for task_id in task_ids:
-            marker_key = '{}:weblab:task_ids:active:{}'.format(
-                self.key_base, task_id)
-            task_key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
-            pipeline.exists(marker_key)
-            pipeline.exists(task_key)
-            pipeline.hget(task_key, 'running')
-        values = pipeline.execute()
-
-        not_started = []
-        stale = []
-        for index, task_id in enumerate(task_ids):
-            marker_exists = values[index * 3]
-            task_exists = values[index * 3 + 1]
-            running = values[index * 3 + 2]
-            if marker_exists and task_exists and not running:
-                not_started.append(task_id)
-            else:
-                stale.append(task_id)
+        not_started, stale = self._classify_pending_task_ids(task_ids)
         self._prune_index_members('pending_tasks', stale)
         return not_started
 
