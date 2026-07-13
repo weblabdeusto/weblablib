@@ -59,7 +59,56 @@ Redis
                                   in Redis. If one is ``lab1`` and the other
                                   is ``lab2``, in Redis values will start by
                                   ``lab1:`` or ``lab2:``.
+``WEBLAB_REDIS_INDEX_MODE``       Redis discovery mode. ``legacy`` (the
+                                  default) preserves the historical behavior.
+                                  ``shadow`` maintains indices while legacy
+                                  discovery remains authoritative. ``indexed``
+                                  uses a prepared index and avoids ``KEYS`` on
+                                  normal cleaner and task-runner paths.
+``WEBLAB_REDIS_INDEX_EPOCH``      Deployment-controlled identifier required in
+                                  ``shadow`` and ``indexed`` modes. Use a new
+                                  value after every rollback before preparing
+                                  and enabling indexed reads again.
 ================================= =========================================
+
+Redis discovery indices
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The Redis index is explicitly opt-in. Flask configuration takes precedence;
+the same-named environment variables are used only when the Flask keys are not
+set. In ``legacy`` mode WebLabLib performs exactly the historical Redis
+operations and does not read or write index keys.
+
+Use this sequence independently for each ``WEBLAB_REDIS_BASE``:
+
+#. Upgrade every process that can create sessions or tasks for that base, set
+   ``WEBLAB_REDIS_INDEX_MODE=shadow``, and set a new
+   ``WEBLAB_REDIS_INDEX_EPOCH``.
+#. Run ``flask weblab redis-index status --json`` and resolve every reported
+   Redis safety or key-type error.
+#. Run ``flask weblab redis-index prepare --json``. Preparation is locked,
+   backfills missing live members with ``SCAN``, and requires zero missing live
+   members before recording readiness. Stale members are harmless and are
+   validated and pruned by indexed reads.
+#. Change readers to ``indexed`` only after preparation reports ``ready: true``.
+   Producers may remain in ``shadow`` during a staged rollout because both
+   modes dual-write the same index.
+
+WebLabLib 0.5.8 processes can coexist with 0.5.9 while 0.5.9 remains in
+``shadow``. Do not leave an old writer for a Redis base after any reader for
+that base enters ``indexed``; old writers do not maintain the index. Rollback
+all affected processes for that base to ``legacy`` together. A later re-upgrade
+must use a new epoch and repeat shadow preparation.
+
+Index modes require standalone Redis, a non-``allkeys-*`` eviction policy, and
+permission to inspect server configuration and execute the required
+``TYPE``, ``SCAN``, set, string, and hash commands. Redis Cluster remains
+unsupported. Existing session/task hashes and markers remain the TTL authority
+and are kept for rollback compatibility.
+
+If readiness or an index set disappears at runtime, an indexed read emits a
+rate-limited critical event and falls back to legacy discovery for that call.
+Normal indexed cleaner and task-runner paths do not issue ``KEYS`` or ``SCAN``.
 
 Session management
 ------------------
@@ -106,4 +155,3 @@ Processes and threading
                                   and ``WEBLAB_TASK_THREADS_PROCESS=0``. If you
                                   use it, make sure you run ``flask loop``
 ================================= =========================================
-

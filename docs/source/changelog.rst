@@ -3,6 +3,33 @@
 Changelog
 =========
 
+Version 0.5.9
+-------------
+
+Date: pending final release
+
+Changes
+^^^^^^^
+
+ * Add opt-in ``legacy``, ``shadow``, and ``indexed`` Redis discovery modes.
+ * Add epoch-controlled, locked index status and preparation commands.
+ * Remove ``KEYS`` from normal indexed session-cleaner and task-runner paths
+   while preserving legacy hashes, TTL markers, task claims, and rollback.
+ * Add startup safety checks, verified runtime fallback, parity reporting, and
+   stale-member pruning.
+
+Version 0.5.8
+-------------
+
+Date: July 13th, 2026
+
+Changes
+^^^^^^^
+
+ * Add structured, privacy-conscious session lifecycle logging for expiry,
+   disposal, and protected-route rejection events.
+ * Deduplicate expiry events in Redis and sanitize dynamic request paths.
+
 Version 0.5.7
 -------------
 

@@ -23,7 +23,35 @@ You must run:
      clean-expired-users  Clean expired users.
      fake                 Fake user management.
      loop                 Run planned tasks and clean expired users,...
+     redis-index          Inspect and prepare optional Redis discovery indices.
      run-tasks            Run planned tasks.
+
+
+Redis index management
+----------------------
+
+The status command is read-only. It uses incremental Redis ``SCAN`` to compare
+legacy records with the optional index and can emit machine-readable JSON:
+
+.. code-block:: shell
+
+   $ flask weblab redis-index status --json
+
+It exits with status 1 when Redis safety checks, command access, key types, or
+parity inspection fail. A non-JSON invocation prints the current mode, epoch,
+readiness, and missing/stale counts.
+
+Preparation is available only in ``shadow`` mode:
+
+.. code-block:: shell
+
+   $ flask weblab redis-index prepare --scan-count 500 --json
+
+It takes a per-base Redis lock, invalidates prior readiness, incrementally
+backfills missing live sessions and pending tasks, verifies that no live member
+is missing, and records the configured epoch. It never deletes legacy hashes or
+markers. See :ref:`configuration` for the required staged rollout and rollback
+sequence.
 
 
 Running tasks and cleaning resources
