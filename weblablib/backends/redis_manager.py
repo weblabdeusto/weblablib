@@ -497,9 +497,8 @@ class RedisManager(object):
             pipeline.smembers(index_key)
             ready_epoch, members = pipeline.execute()
         except redis.exceptions.RedisError as error:
-            self._emit_index_event(
-                'critical', 'legacy_fallback', kind,
-                reason=error.__class__.__name__)
+            self._invalidate_index_readiness(
+                kind, 'legacy_fallback', error.__class__.__name__)
             return None
 
         if ready_epoch != self.index_epoch:
@@ -508,12 +507,28 @@ class RedisManager(object):
                 reason='epoch_not_ready')
             return None
         if REDIS_INDEX_SENTINEL not in members:
-            self._emit_index_event(
-                'critical', 'legacy_fallback', kind,
-                reason='sentinel_missing')
+            self._invalidate_index_readiness(
+                kind, 'legacy_fallback', 'sentinel_missing')
             return None
         members.discard(REDIS_INDEX_SENTINEL)
         return members
+
+    def _invalidate_index_readiness(self, kind, action, reason):
+        fields = {}
+        try:
+            self.client.delete(self._index_ready_key)
+        except redis.exceptions.RedisError as error:
+            fields['readiness_invalidation_error'] = error.__class__.__name__
+        self._emit_index_event(
+            'critical', action, kind, reason=reason, **fields)
+
+    def _execute_index_write_pipeline(self, pipeline, kind):
+        try:
+            return pipeline.execute()
+        except redis.exceptions.RedisError as error:
+            self._invalidate_index_readiness(
+                kind, 'index_write_failed', error.__class__.__name__)
+            raise
 
     def _prune_index_members(self, kind, members):
         if not members:
@@ -561,7 +576,9 @@ class RedisManager(object):
         pipeline.expire('{}:weblab:sessions:{}'.format(self.key_base, session_id), expiration + 300)
         if self._index_writes:
             pipeline.sadd(self._active_sessions_index_key, session_id)
-        pipeline.execute()
+            self._execute_index_write_pipeline(pipeline, 'active_sessions')
+        else:
+            pipeline.execute()
 
     def is_session_deleted(self, session_id):
         return self.client.get('{}:weblab:sessions:{}'.format(self.key_base, session_id)) is None
@@ -655,7 +672,9 @@ class RedisManager(object):
         pipeline.delete('{}:weblab:inactive:{}'.format(self.key_base, session_id))
         if self._index_writes:
             pipeline.srem(self._active_sessions_index_key, session_id)
-        pipeline.execute()
+            self._execute_index_write_pipeline(pipeline, 'active_sessions')
+        else:
+            pipeline.execute()
 
     def delete_user(self, session_id, expired_user):
         if self.client.hget('{}:weblab:active:{}'.format(self.key_base, session_id), "max_date") is None:
@@ -690,7 +709,10 @@ class RedisManager(object):
         pipeline.expire("{}:weblab:inactive:{}".format(self.key_base, session_id), current_app.config.get(ConfigurationKeys.WEBLAB_EXPIRED_USERS_TIMEOUT, 3600))
         if self._index_writes:
             pipeline.srem(self._active_sessions_index_key, session_id)
-        results = pipeline.execute()
+            results = self._execute_index_write_pipeline(
+                pipeline, 'active_sessions')
+        else:
+            results = pipeline.execute()
 
         return results[0] != 0 # If redis returns 0 on delete() it means that it was not deleted
 
@@ -764,8 +786,19 @@ class RedisManager(object):
         else:
             session_ids = indexed_ids
 
-        expired_sessions, valid_sessions, stale_sessions = \
-            self._find_expired_sessions_from_ids(session_ids)
+        try:
+            expired_sessions, valid_sessions, stale_sessions = \
+                self._find_expired_sessions_from_ids(session_ids)
+        except redis.exceptions.RedisError as error:
+            if indexed_ids is None:
+                raise
+            self._invalidate_index_readiness(
+                'active_sessions', 'legacy_fallback',
+                'validation_{}'.format(error.__class__.__name__))
+            indexed_ids = None
+            session_ids = self._legacy_active_session_ids()
+            expired_sessions, valid_sessions, stale_sessions = \
+                self._find_expired_sessions_from_ids(session_ids)
 
         if self.index_mode == 'indexed' and indexed_ids is not None:
             self._prune_index_members('active_sessions', stale_sessions)
@@ -860,7 +893,9 @@ class RedisManager(object):
         pipeline.expire('{}:weblab:task_ids:active:{}'.format(self.key_base, task_id), self.task_expires)
         if self._index_writes:
             pipeline.sadd(self._pending_tasks_index_key, task_id)
-        pipeline.execute()
+            self._execute_index_write_pipeline(pipeline, 'pending_tasks')
+        else:
+            pipeline.execute()
         return task_id
 
     def clean_lock_global_unique_task(self, task_name):
@@ -915,7 +950,12 @@ class RedisManager(object):
         if self.index_mode == 'indexed':
             indexed_ids = self._indexed_members('pending_tasks')
             if indexed_ids is not None:
-                return self._indexed_tasks_not_started(indexed_ids)
+                try:
+                    return self._indexed_tasks_not_started(indexed_ids)
+                except redis.exceptions.RedisError as error:
+                    self._invalidate_index_readiness(
+                        'pending_tasks', 'legacy_fallback',
+                        'validation_{}'.format(error.__class__.__name__))
 
         not_started = self._legacy_tasks_not_started()
         self._report_shadow_parity('pending_tasks', not_started)
@@ -940,7 +980,11 @@ class RedisManager(object):
         if self._index_writes:
             pipeline.srem(self._pending_tasks_index_key, task_id)
 
-        results = pipeline.execute()
+        if self._index_writes:
+            results = self._execute_index_write_pipeline(
+                pipeline, 'pending_tasks')
+        else:
+            results = pipeline.execute()
         running, name, args, kwargs, session_id = results[:5]
         if not running:
             # other thread did the hset first
@@ -971,7 +1015,10 @@ class RedisManager(object):
         pipeline.hset(key, 'error', json.dumps(error))
         if self._index_writes:
             pipeline.srem(self._pending_tasks_index_key, task_id)
-        results = pipeline.execute()
+            results = self._execute_index_write_pipeline(
+                pipeline, 'pending_tasks')
+        else:
+            results = pipeline.execute()
         if not results[0]:
             # If it had been deleted... delete it
             self.client.delete(key)
@@ -1068,4 +1115,7 @@ class RedisManager(object):
             pipeline.delete('{}:weblab:task_ids:active:{}'.format(self.key_base, task_id))
             if self._index_writes:
                 pipeline.srem(self._pending_tasks_index_key, task_id)
-        pipeline.execute()
+        if self._index_writes:
+            self._execute_index_write_pipeline(pipeline, 'pending_tasks')
+        else:
+            pipeline.execute()

@@ -97,6 +97,19 @@ class PipelineResultProxy(object):
         return results
 
 
+class DeniedSaddPipeline(object):
+    def __init__(self, pipeline):
+        self._pipeline = pipeline
+
+    def __getattr__(self, name):
+        return getattr(self._pipeline, name)
+
+    def sadd(self, key, *values):
+        del values
+        self._pipeline.hset(key, 'denied-sadd', '1')
+        return self
+
+
 class WatchErrorOnceClient(ClientProxy):
     def __init__(self, client):
         super(WatchErrorOnceClient, self).__init__(client)
@@ -387,6 +400,45 @@ class RedisIndexWriteTest(BaseRedisIndexTest):
         legacy = self.manager('legacy')
         task_id = shadow.new_task('session', 'task', [], {})
         self.assertIn(task_id, legacy.get_tasks_not_started())
+
+    def test_session_index_write_failure_invalidates_readiness(self):
+        manager = self.prepare_index('epoch-1')
+        original_pipeline = self.client.pipeline
+        manager.client = ClientProxy(
+            self.client,
+            pipeline=lambda: DeniedSaddPipeline(original_pipeline()))
+
+        with self.assertRaises(redis.exceptions.ResponseError):
+            manager.add_user('partial-session', FakeCurrentUser(), 60)
+
+        active_key = '{}:weblab:active:partial-session'.format(self.key_base)
+        self.assertIsNotNone(self.client.hget(active_key, 'max_date'))
+        self.assertNotIn('partial-session', self.client.smembers(
+            self.active_index_key))
+        self.assertIsNone(self.client.get(self.ready_key))
+        self.assertEqual(len(self.logger.critical_messages), 1)
+        self.assertIn('index_write_failed', self.logger.critical_messages[0])
+
+    def test_task_index_write_failure_invalidates_readiness(self):
+        manager = self.prepare_index('epoch-1')
+        original_pipeline = self.client.pipeline
+        manager.client = ClientProxy(
+            self.client,
+            pipeline=lambda: DeniedSaddPipeline(original_pipeline()))
+
+        with self.assertRaises(redis.exceptions.ResponseError):
+            manager.new_task('session', 'task', [], {})
+
+        marker_keys = self.client.keys(
+            '{}:weblab:task_ids:active:*'.format(self.key_base))
+        self.assertEqual(len(marker_keys), 1)
+        task_id = marker_keys[0].rsplit(':', 1)[1]
+        self.assertIsNotNone(self.client.hget(
+            '{}:weblab:tasks:{}'.format(self.key_base, task_id), 'name'))
+        self.assertNotIn(task_id, self.client.smembers(self.pending_index_key))
+        self.assertIsNone(self.client.get(self.ready_key))
+        self.assertEqual(len(self.logger.critical_messages), 1)
+        self.assertIn('index_write_failed', self.logger.critical_messages[0])
 
 
 class RedisIndexMigrationTest(BaseRedisIndexTest):
@@ -777,9 +829,52 @@ class RedisIndexedReadTest(BaseRedisIndexTest):
         self.assertEqual(manager.find_expired_sessions(), ['expired'])
         self.assertEqual(len(self.logger.critical_messages), 1)
         self.assertNotIn('expired', self.logger.critical_messages[0])
+        self.assertIsNone(self.client.get(self.ready_key))
 
         self.client.set(self.active_index_key, 'wrong-type')
         self.assertEqual(manager.find_expired_sessions(), ['expired'])
+
+    def test_indexed_task_validation_error_falls_back_and_invalidates_readiness(self):
+        self.seed_task('pending')
+        manager = self.indexed_manager()
+        original = manager._indexed_tasks_not_started
+
+        def denied_validation(task_ids):
+            del task_ids
+            raise redis.exceptions.ResponseError('command denied')
+
+        manager._indexed_tasks_not_started = denied_validation
+        try:
+            self.assertEqual(manager.get_tasks_not_started(), ['pending'])
+        finally:
+            manager._indexed_tasks_not_started = original
+
+        self.assertIsNone(self.client.get(self.ready_key))
+        self.assertEqual(len(self.logger.critical_messages), 1)
+        self.assertIn('legacy_fallback', self.logger.critical_messages[0])
+
+    def test_indexed_session_validation_error_falls_back_and_invalidates_readiness(self):
+        self.seed_session('expired')
+        manager = self.indexed_manager()
+        original = manager._find_expired_sessions_from_ids
+        calls = []
+
+        def fail_once(session_ids):
+            calls.append(set(session_ids))
+            if len(calls) == 1:
+                raise redis.exceptions.ResponseError('command denied')
+            return original(session_ids)
+
+        manager._find_expired_sessions_from_ids = fail_once
+        try:
+            self.assertEqual(manager.find_expired_sessions(), ['expired'])
+        finally:
+            manager._find_expired_sessions_from_ids = original
+
+        self.assertEqual(len(calls), 2)
+        self.assertIsNone(self.client.get(self.ready_key))
+        self.assertEqual(len(self.logger.critical_messages), 1)
+        self.assertIn('legacy_fallback', self.logger.critical_messages[0])
 
     def test_epoch_loss_falls_back_for_tasks_without_keys_on_healthy_path(self):
         self.seed_task('pending')
@@ -831,6 +926,36 @@ class RedisIndexedReadTest(BaseRedisIndexTest):
         manager.weblab = object()
         self.assertFalse(manager._emit_index_event(
             'critical', 'legacy_fallback', 'pending_tasks'))
+
+    def test_readiness_invalidation_failure_is_reported(self):
+        manager = self.manager()
+
+        def denied_delete(*args, **kwargs):
+            del args, kwargs
+            raise redis.exceptions.ResponseError('command denied')
+
+        manager.client = ClientProxy(self.client, delete=denied_delete)
+        manager._invalidate_index_readiness(
+            'pending_tasks', 'legacy_fallback', 'test')
+
+        self.assertEqual(len(self.logger.critical_messages), 1)
+        self.assertIn('readiness_invalidation_error',
+                      self.logger.critical_messages[0])
+
+    def test_legacy_session_validation_error_is_not_masked(self):
+        manager = self.manager()
+        original = manager._find_expired_sessions_from_ids
+
+        def denied_validation(session_ids):
+            del session_ids
+            raise redis.exceptions.ResponseError('command denied')
+
+        manager._find_expired_sessions_from_ids = denied_validation
+        try:
+            with self.assertRaises(redis.exceptions.ResponseError):
+                manager.find_expired_sessions()
+        finally:
+            manager._find_expired_sessions_from_ids = original
 
     def test_test_cleanup_removes_indexed_session_member(self):
         manager = self.manager('shadow', 'epoch-1')

@@ -15,8 +15,8 @@ Changes
  * Add epoch-controlled, locked index status and preparation commands.
  * Remove ``KEYS`` from normal indexed session-cleaner and task-runner paths
    while preserving legacy hashes, TTL markers, task claims, and rollback.
- * Add startup safety checks, verified runtime fallback, parity reporting, and
-   stale-member pruning.
+ * Add startup safety checks, fail-closed readiness invalidation, verified
+   runtime fallback, parity reporting, and stale-member pruning.
 
 Version 0.5.8
 -------------

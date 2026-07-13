@@ -106,9 +106,13 @@ permission to inspect server configuration and execute the required
 unsupported. Existing session/task hashes and markers remain the TTL authority
 and are kept for rollback compatibility.
 
-If readiness or an index set disappears at runtime, an indexed read emits a
-rate-limited critical event and falls back to legacy discovery for that call.
-Normal indexed cleaner and task-runner paths do not issue ``KEYS`` or ``SCAN``.
+If readiness or an index set disappears at runtime, or candidate validation
+fails, an indexed read invalidates readiness, emits a rate-limited critical
+event, and falls back to legacy discovery for that call. An index-maintaining
+write failure also invalidates readiness and preserves the Redis error for the
+caller. Return the affected Redis base to ``shadow`` and repeat preparation
+before using ``indexed`` again. Normal healthy indexed cleaner and task-runner
+paths do not issue ``KEYS`` or ``SCAN``.
 
 Session management
 ------------------
