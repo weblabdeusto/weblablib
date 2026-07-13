@@ -13,7 +13,7 @@ import six
 from flask import current_app
 
 from weblablib.config import ConfigurationKeys
-from weblablib.exc import InvalidConfigError
+from weblablib.exc import AlreadyRunningError, InvalidConfigError
 from weblablib.utils import create_token, _current_timestamp
 from weblablib.users import AnonymousUser, CurrentUser, ExpiredUser
 
@@ -54,6 +54,8 @@ class RedisManager(object):
         self._pending_tasks_index_key = '{}:weblab:index:v1:pending_tasks'.format(key_base)
         self._index_ready_key = '{}:weblab:index:v1:ready'.format(key_base)
         self._index_lock_key = '{}:weblab:index:v1:migration_lock'.format(key_base)
+        self._index_writes = self.index_mode in ('shadow', 'indexed')
+        self._index_log_times = {}
 
         if self.index_mode != 'legacy':
             if not self.index_epoch:
@@ -105,15 +107,27 @@ class RedisManager(object):
                 (self._index_ready_key, ('none', 'string')),
                 (self._index_lock_key, ('none', 'string')),
             )
-            observed_types = []
+            observed_types = {}
             for key, allowed_types in expected_types:
                 key_type = self.client.type(key)
-                observed_types.append((key, key_type, allowed_types))
-            for key, key_type, allowed_types in observed_types:
+                observed_types[key] = key_type
+            for key, allowed_types in expected_types:
+                key_type = observed_types[key]
                 if key_type not in allowed_types:
                     raise InvalidConfigError(
                         'Unexpected Redis type {} for internal index key'.format(
                             key_type))
+
+            ready_epoch = self.client.get(self._index_ready_key)
+            if ready_epoch is not None:
+                for key in (self._active_sessions_index_key,
+                            self._pending_tasks_index_key):
+                    if observed_types[key] != 'set':
+                        raise InvalidConfigError(
+                            'A prepared Redis index set is missing')
+                    if REDIS_INDEX_SENTINEL not in self.client.smembers(key):
+                        raise InvalidConfigError(
+                            'A prepared Redis index sentinel is missing')
 
             # SCAN is management-only, but verify it before allowing a mode
             # that can later be marked ready.
@@ -122,20 +136,25 @@ class RedisManager(object):
                                  self.key_base),
                              count=1)
 
+            probe_key = '{}:weblab:index:v1:command-probe:{}'.format(
+                self.key_base, create_token())
             pipeline = self.client.pipeline()
-            pipeline.sadd(self._active_sessions_index_key, REDIS_INDEX_SENTINEL)
-            pipeline.sadd(self._pending_tasks_index_key, REDIS_INDEX_SENTINEL)
-            pipeline.sadd(self._active_sessions_index_key,
-                          REDIS_INDEX_PROBE_MEMBER)
-            pipeline.smembers(self._active_sessions_index_key)
-            pipeline.smembers(self._pending_tasks_index_key)
-            pipeline.srem(self._active_sessions_index_key,
-                          REDIS_INDEX_PROBE_MEMBER)
+            pipeline.sadd(probe_key, REDIS_INDEX_PROBE_MEMBER)
+            pipeline.expire(probe_key, 60)
+            pipeline.smembers(probe_key)
+            pipeline.srem(probe_key, REDIS_INDEX_PROBE_MEMBER)
+            pipeline.delete(probe_key)
             results = pipeline.execute()
-            if REDIS_INDEX_SENTINEL not in results[3]:
-                raise InvalidConfigError('Active-session index probe failed')
-            if REDIS_INDEX_SENTINEL not in results[4]:
-                raise InvalidConfigError('Pending-task index probe failed')
+            if REDIS_INDEX_PROBE_MEMBER not in results[2]:
+                raise InvalidConfigError('Redis set command probe failed')
+
+            if self.index_mode == 'shadow' and ready_epoch is None:
+                pipeline = self.client.pipeline()
+                pipeline.sadd(self._active_sessions_index_key,
+                              REDIS_INDEX_SENTINEL)
+                pipeline.sadd(self._pending_tasks_index_key,
+                              REDIS_INDEX_SENTINEL)
+                pipeline.execute()
         except InvalidConfigError:
             raise
         except redis.exceptions.RedisError as error:
@@ -144,20 +163,332 @@ class RedisManager(object):
                     error))
 
     def _validate_indexed_readiness(self):
-        try:
-            ready_epoch = self.client.get(self._index_ready_key)
-            active_ready = self.client.sismember(
-                self._active_sessions_index_key, REDIS_INDEX_SENTINEL)
-            pending_ready = self.client.sismember(
-                self._pending_tasks_index_key, REDIS_INDEX_SENTINEL)
-        except redis.exceptions.RedisError as error:
-            raise InvalidConfigError(
-                'Could not validate Redis index readiness: {}'.format(error))
-
-        if ready_epoch != self.index_epoch or not active_ready or not pending_ready:
+        status = self.redis_index_status()
+        if not status['ready']:
             raise InvalidConfigError(
                 'Redis indices are not prepared for epoch {}'.format(
                     self.index_epoch))
+
+    def _validate_scan_count(self, scan_count):
+        try:
+            scan_count = int(scan_count)
+        except (TypeError, ValueError):
+            raise InvalidConfigError('Redis index scan count must be an integer')
+        if scan_count <= 0:
+            raise InvalidConfigError('Redis index scan count must be positive')
+        return scan_count
+
+    def _scan_ids(self, prefix, scan_count):
+        pattern = '{}*'.format(prefix)
+        return [key[len(prefix):]
+                for key in self.client.scan_iter(match=pattern, count=scan_count)]
+
+    def _expected_active_session_ids(self, scan_count):
+        prefix = '{}:weblab:active:'.format(self.key_base)
+        session_ids = self._scan_ids(prefix, scan_count)
+        pipeline = self.client.pipeline()
+        for session_id in session_ids:
+            key = '{}{}'.format(prefix, session_id)
+            pipeline.hget(key, 'max_date')
+            pipeline.hget(key, 'last_poll')
+        values = pipeline.execute()
+
+        expected = set()
+        for index, session_id in enumerate(session_ids):
+            max_date = values[index * 2]
+            last_poll = values[index * 2 + 1]
+            if max_date is not None and last_poll is not None:
+                expected.add(session_id)
+        return expected
+
+    def _expected_pending_task_ids(self, scan_count):
+        marker_prefix = '{}:weblab:task_ids:active:'.format(self.key_base)
+        task_ids = self._scan_ids(marker_prefix, scan_count)
+        pipeline = self.client.pipeline()
+        for task_id in task_ids:
+            pipeline.exists('{}{}'.format(marker_prefix, task_id))
+            task_key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
+            pipeline.exists(task_key)
+            pipeline.hget(task_key, 'running')
+        values = pipeline.execute()
+
+        expected = set()
+        for index, task_id in enumerate(task_ids):
+            marker_exists = values[index * 3]
+            task_exists = values[index * 3 + 1]
+            running = values[index * 3 + 2]
+            if marker_exists and task_exists and not running:
+                expected.add(task_id)
+        return expected
+
+    def _read_index_set(self, key, errors):
+        try:
+            key_type = self.client.type(key)
+            if key_type == 'none':
+                return set(), False
+            if key_type != 'set':
+                errors.append('unexpected_type')
+                return set(), False
+            members = self.client.smembers(key)
+        except redis.exceptions.RedisError as error:
+            errors.append(error.__class__.__name__)
+            return set(), False
+
+        sentinel_present = REDIS_INDEX_SENTINEL in members
+        members.discard(REDIS_INDEX_SENTINEL)
+        return members, sentinel_present
+
+    def redis_index_status(self, scan_count=500):
+        scan_count = self._validate_scan_count(scan_count)
+        errors = []
+        policy = None
+        cluster_enabled = None
+        try:
+            policy = self.client.config_get('maxmemory-policy').get(
+                'maxmemory-policy')
+            if not policy:
+                errors.append('maxmemory_policy_unknown')
+            elif policy.startswith('allkeys-'):
+                errors.append('unsupported_eviction_policy')
+            cluster_enabled = int(
+                self.client.info('cluster').get('cluster_enabled', 0))
+            if cluster_enabled:
+                errors.append('redis_cluster_unsupported')
+            expected_active = self._expected_active_session_ids(scan_count)
+            expected_pending = self._expected_pending_task_ids(scan_count)
+        except redis.exceptions.RedisError as error:
+            errors.append(error.__class__.__name__)
+            expected_active = set()
+            expected_pending = set()
+
+        indexed_active, active_sentinel = self._read_index_set(
+            self._active_sessions_index_key, errors)
+        indexed_pending, pending_sentinel = self._read_index_set(
+            self._pending_tasks_index_key, errors)
+        try:
+            ready_epoch = self.client.get(self._index_ready_key)
+        except redis.exceptions.RedisError as error:
+            errors.append(error.__class__.__name__)
+            ready_epoch = None
+
+        active_missing = expected_active - indexed_active
+        active_stale = indexed_active - expected_active
+        pending_missing = expected_pending - indexed_pending
+        pending_stale = indexed_pending - expected_pending
+        ready = bool(
+            not errors and self.index_epoch and
+            ready_epoch == self.index_epoch and
+            active_sentinel and pending_sentinel and
+            not active_missing and not pending_missing)
+
+        return {
+            'ok': not errors,
+            'mode': self.index_mode,
+            'epoch': self.index_epoch,
+            'ready_epoch': ready_epoch,
+            'ready': ready,
+            'scan_count': scan_count,
+            'maxmemory_policy': policy,
+            'cluster_enabled': cluster_enabled,
+            'errors': sorted(set(errors)),
+            'active_sessions': {
+                'expected': len(expected_active),
+                'indexed': len(indexed_active),
+                'missing': len(active_missing),
+                'stale': len(active_stale),
+                'sentinel': active_sentinel,
+            },
+            'pending_tasks': {
+                'expected': len(expected_pending),
+                'indexed': len(indexed_pending),
+                'missing': len(pending_missing),
+                'stale': len(pending_stale),
+                'sentinel': pending_sentinel,
+            },
+        }
+
+    def _queue_set_members(self, pipeline, method_name, key, members,
+                           batch_size):
+        members = list(members)
+        method = getattr(pipeline, method_name)
+        for start in range(0, len(members), batch_size):
+            method(key, *members[start:start + batch_size])
+
+    def _reconcile_redis_indices(self, scan_count):
+        expected_active = self._expected_active_session_ids(scan_count)
+        expected_pending = self._expected_pending_task_ids(scan_count)
+        indexed_active = self.client.smembers(self._active_sessions_index_key)
+        indexed_pending = self.client.smembers(self._pending_tasks_index_key)
+        indexed_active.discard(REDIS_INDEX_SENTINEL)
+        indexed_pending.discard(REDIS_INDEX_SENTINEL)
+
+        pipeline = self.client.pipeline()
+        pipeline.sadd(self._active_sessions_index_key, REDIS_INDEX_SENTINEL)
+        pipeline.sadd(self._pending_tasks_index_key, REDIS_INDEX_SENTINEL)
+        self._queue_set_members(pipeline, 'sadd', self._active_sessions_index_key,
+                                expected_active - indexed_active, scan_count)
+        self._queue_set_members(pipeline, 'srem', self._active_sessions_index_key,
+                                indexed_active - expected_active, scan_count)
+        self._queue_set_members(pipeline, 'sadd', self._pending_tasks_index_key,
+                                expected_pending - indexed_pending, scan_count)
+        self._queue_set_members(pipeline, 'srem', self._pending_tasks_index_key,
+                                indexed_pending - expected_pending, scan_count)
+        pipeline.execute()
+
+    def _release_index_lock(self, token):
+        while True:
+            pipeline = self.client.pipeline()
+            try:
+                pipeline.watch(self._index_lock_key)
+                if pipeline.get(self._index_lock_key) != token:
+                    pipeline.unwatch()
+                    return
+                pipeline.multi()
+                pipeline.delete(self._index_lock_key)
+                pipeline.execute()
+                return
+            except redis.exceptions.WatchError:
+                continue
+            finally:
+                pipeline.reset()
+
+    def prepare_redis_index(self, scan_count=500, lock_ttl=300):
+        if self.index_mode != 'shadow':
+            raise InvalidConfigError(
+                'Redis indices can only be prepared in shadow mode')
+        scan_count = self._validate_scan_count(scan_count)
+        try:
+            lock_ttl = int(lock_ttl)
+        except (TypeError, ValueError):
+            raise InvalidConfigError('Redis index lock TTL must be an integer')
+        if lock_ttl <= 0:
+            raise InvalidConfigError('Redis index lock TTL must be positive')
+
+        token = create_token()
+        if not self.client.set(self._index_lock_key, token, nx=True, ex=lock_ttl):
+            raise AlreadyRunningError(
+                'Another Redis index preparation is already running')
+
+        try:
+            # Invalidate any previous readiness while reconciliation runs.
+            self.client.delete(self._index_ready_key)
+            status = None
+            for _ in range(3):
+                self._reconcile_redis_indices(scan_count)
+                status = self.redis_index_status(scan_count)
+                if (status['ok'] and
+                        status['active_sessions']['missing'] == 0 and
+                        status['active_sessions']['stale'] == 0 and
+                        status['pending_tasks']['missing'] == 0 and
+                        status['pending_tasks']['stale'] == 0):
+                    break
+            else:
+                raise InvalidConfigError(
+                    'Redis indices did not reach parity during preparation')
+
+            self.client.set(self._index_ready_key, self.index_epoch)
+            status = self.redis_index_status(scan_count)
+            if not status['ready']:
+                if self.client.get(self._index_ready_key) == self.index_epoch:
+                    self.client.delete(self._index_ready_key)
+                raise InvalidConfigError(
+                    'Redis indices changed before readiness could be verified')
+            return status
+        finally:
+            self._release_index_lock(token)
+
+    def _emit_index_event(self, level, action, kind, reason=None, **fields):
+        rate_key = (level, action, kind)
+        now = time.time()
+        last_time = self._index_log_times.get(rate_key)
+        if last_time is not None and now - last_time < 60:
+            return False
+        self._index_log_times[rate_key] = now
+
+        event = {
+            'event': 'weblab_redis_index',
+            'action': action,
+            'kind': kind,
+            'mode': self.index_mode,
+            'redis_base': self.key_base,
+        }
+        if reason is not None:
+            event['reason'] = reason
+        event.update(fields)
+
+        app = getattr(self.weblab, '_app', None)
+        logger = getattr(app, 'logger', None)
+        log_method = getattr(logger, level, None)
+        if log_method is None:
+            return False
+        log_method(json.dumps(event, sort_keys=True))
+        return True
+
+    def _report_shadow_parity(self, kind, expected_ids):
+        if self.index_mode != 'shadow':
+            return
+        if kind == 'active_sessions':
+            index_key = self._active_sessions_index_key
+        else:
+            index_key = self._pending_tasks_index_key
+        try:
+            indexed_ids = self.client.smembers(index_key)
+        except redis.exceptions.RedisError as error:
+            self._emit_index_event('warning', 'shadow_parity_error', kind,
+                                   reason=error.__class__.__name__)
+            return
+
+        indexed_ids.discard(REDIS_INDEX_SENTINEL)
+        expected_ids = set(expected_ids)
+        self._emit_index_event(
+            'info', 'shadow_parity', kind,
+            expected_count=len(expected_ids),
+            indexed_count=len(indexed_ids),
+            missing_count=len(expected_ids - indexed_ids),
+            stale_count=len(indexed_ids - expected_ids))
+
+    def _indexed_members(self, kind):
+        if kind == 'active_sessions':
+            index_key = self._active_sessions_index_key
+        else:
+            index_key = self._pending_tasks_index_key
+        try:
+            pipeline = self.client.pipeline()
+            pipeline.get(self._index_ready_key)
+            pipeline.smembers(index_key)
+            ready_epoch, members = pipeline.execute()
+        except redis.exceptions.RedisError as error:
+            self._emit_index_event(
+                'critical', 'legacy_fallback', kind,
+                reason=error.__class__.__name__)
+            return None
+
+        if ready_epoch != self.index_epoch:
+            self._emit_index_event(
+                'critical', 'legacy_fallback', kind,
+                reason='epoch_not_ready')
+            return None
+        if REDIS_INDEX_SENTINEL not in members:
+            self._emit_index_event(
+                'critical', 'legacy_fallback', kind,
+                reason='sentinel_missing')
+            return None
+        members.discard(REDIS_INDEX_SENTINEL)
+        return members
+
+    def _prune_index_members(self, kind, members):
+        if not members:
+            return
+        if kind == 'active_sessions':
+            index_key = self._active_sessions_index_key
+        else:
+            index_key = self._pending_tasks_index_key
+        try:
+            self.client.srem(index_key, *members)
+        except redis.exceptions.RedisError as error:
+            self._emit_index_event(
+                'critical', 'prune_failed', kind,
+                reason=error.__class__.__name__, member_count=len(members))
 
     def add_user(self, session_id, user, expiration):
         """
@@ -189,6 +520,8 @@ class RedisManager(object):
         pipeline.expire(key, expiration)
         pipeline.set('{}:weblab:sessions:{}'.format(self.key_base, session_id), time.time())
         pipeline.expire('{}:weblab:sessions:{}'.format(self.key_base, session_id), expiration + 300)
+        if self._index_writes:
+            pipeline.sadd(self._active_sessions_index_key, session_id)
         pipeline.execute()
 
     def is_session_deleted(self, session_id):
@@ -278,8 +611,12 @@ class RedisManager(object):
 
     def _tests_delete_user(self, session_id):
         "Only for testing"
-        self.client.delete('{}:weblab:active:{}'.format(self.key_base, session_id))
-        self.client.delete('{}:weblab:inactive:{}'.format(self.key_base, session_id))
+        pipeline = self.client.pipeline()
+        pipeline.delete('{}:weblab:active:{}'.format(self.key_base, session_id))
+        pipeline.delete('{}:weblab:inactive:{}'.format(self.key_base, session_id))
+        if self._index_writes:
+            pipeline.srem(self._active_sessions_index_key, session_id)
+        pipeline.execute()
 
     def delete_user(self, session_id, expired_user):
         if self.client.hget('{}:weblab:active:{}'.format(self.key_base, session_id), "max_date") is None:
@@ -312,6 +649,8 @@ class RedisManager(object):
         # During half an hour after being created, the user is redirected to
         # the original URL. After that, every record of the user has been deleted
         pipeline.expire("{}:weblab:inactive:{}".format(self.key_base, session_id), current_app.config.get(ConfigurationKeys.WEBLAB_EXPIRED_USERS_TIMEOUT, 3600))
+        if self._index_writes:
+            pipeline.srem(self._active_sessions_index_key, session_id)
         results = pipeline.execute()
 
         return results[0] != 0 # If redis returns 0 on delete() it means that it was not deleted
@@ -334,12 +673,17 @@ class RedisManager(object):
             # If max_date is None it means that it had been previously deleted
             self.client.delete("{}:weblab:active:{}".format(self.key_base, session_id))
 
-    def find_expired_sessions(self):
+    def _legacy_active_session_ids(self):
+        prefix = '{}:weblab:active:'.format(self.key_base)
+        return [active_key[len(prefix):]
+                for active_key in self.client.keys('{}*'.format(prefix))]
+
+    def _find_expired_sessions_from_ids(self, session_ids):
         expired_sessions = []
+        valid_sessions = []
+        stale_sessions = []
 
-        for active_key in self.client.keys('{}:weblab:active:*'.format(self.key_base)):
-            session_id = active_key[len('{}:weblab:active:'.format(self.key_base)):]
-
+        for session_id in session_ids:
             session_id_key = '{}:weblab:active:{}'.format(self.key_base, session_id)
 
             pipeline = self.client.pipeline()
@@ -352,6 +696,7 @@ class RedisManager(object):
             if max_date is not None and last_poll is not None: 
                 # Double check: he might be deleted in the meanwhile
                 # We don't use 'active', since active takes into account 'exited'
+                valid_sessions.append(session_id)
 
                 time_left = float(max_date) - _current_timestamp()
                 time_without_polling = _current_timestamp() - float(last_poll)
@@ -365,7 +710,27 @@ class RedisManager(object):
 
                 elif user_exited:
                     expired_sessions.append(session_id)
+            else:
+                stale_sessions.append(session_id)
 
+        return expired_sessions, valid_sessions, stale_sessions
+
+    def find_expired_sessions(self):
+        indexed_ids = None
+        if self.index_mode == 'indexed':
+            indexed_ids = self._indexed_members('active_sessions')
+
+        if indexed_ids is None:
+            session_ids = self._legacy_active_session_ids()
+        else:
+            session_ids = indexed_ids
+
+        expired_sessions, valid_sessions, stale_sessions = \
+            self._find_expired_sessions_from_ids(session_ids)
+
+        if self.index_mode == 'indexed' and indexed_ids is not None:
+            self._prune_index_members('active_sessions', stale_sessions)
+        self._report_shadow_parity('active_sessions', valid_sessions)
         return expired_sessions
 
     def session_exists(self, session_id):
@@ -454,6 +819,8 @@ class RedisManager(object):
         # Only show these tasks when active is created
         pipeline.set('{}:weblab:task_ids:active:{}'.format(self.key_base, task_id), task_id)
         pipeline.expire('{}:weblab:task_ids:active:{}'.format(self.key_base, task_id), self.task_expires)
+        if self._index_writes:
+            pipeline.sadd(self._pending_tasks_index_key, task_id)
         pipeline.execute()
         return task_id
 
@@ -482,7 +849,7 @@ class RedisManager(object):
     def unlock_user_unique_task(self, task_name, session_id):
         self.client.delete('{}:weblab:user-unique-tasks:{}:{}'.format(self.key_base, task_name, session_id))
 
-    def get_tasks_not_started(self):
+    def _legacy_tasks_not_started(self):
         task_ids = [key[len('{}:weblab:task_ids:active:'.format(self.key_base)):]
                     for key in self.client.keys('{}:weblab:task_ids:active:*'.format(self.key_base))]
 
@@ -498,6 +865,40 @@ class RedisManager(object):
             if not running:
                 not_started.append(task_id)
 
+        return not_started
+
+    def _indexed_tasks_not_started(self, task_ids):
+        pipeline = self.client.pipeline()
+        for task_id in task_ids:
+            marker_key = '{}:weblab:task_ids:active:{}'.format(
+                self.key_base, task_id)
+            task_key = '{}:weblab:tasks:{}'.format(self.key_base, task_id)
+            pipeline.exists(marker_key)
+            pipeline.exists(task_key)
+            pipeline.hget(task_key, 'running')
+        values = pipeline.execute()
+
+        not_started = []
+        stale = []
+        for index, task_id in enumerate(task_ids):
+            marker_exists = values[index * 3]
+            task_exists = values[index * 3 + 1]
+            running = values[index * 3 + 2]
+            if marker_exists and task_exists and not running:
+                not_started.append(task_id)
+            else:
+                stale.append(task_id)
+        self._prune_index_members('pending_tasks', stale)
+        return not_started
+
+    def get_tasks_not_started(self):
+        if self.index_mode == 'indexed':
+            indexed_ids = self._indexed_members('pending_tasks')
+            if indexed_ids is not None:
+                return self._indexed_tasks_not_started(indexed_ids)
+
+        not_started = self._legacy_tasks_not_started()
+        self._report_shadow_parity('pending_tasks', not_started)
         return not_started
 
     def start_task(self, task_id):
@@ -516,8 +917,11 @@ class RedisManager(object):
         pipeline.hget(key, 'args')
         pipeline.hget(key, 'kwargs')
         pipeline.hget(key, 'session_id')
+        if self._index_writes:
+            pipeline.srem(self._pending_tasks_index_key, task_id)
 
-        running, name, args, kwargs, session_id = pipeline.execute()
+        results = pipeline.execute()
+        running, name, args, kwargs, session_id = results[:5]
         if not running:
             # other thread did the hset first
             return None
@@ -545,6 +949,8 @@ class RedisManager(object):
         pipeline.hset(key, 'finished', 'true')
         pipeline.hset(key, 'result', json.dumps(result))
         pipeline.hset(key, 'error', json.dumps(error))
+        if self._index_writes:
+            pipeline.srem(self._pending_tasks_index_key, task_id)
         results = pipeline.execute()
         if not results[0]:
             # If it had been deleted... delete it
@@ -640,4 +1046,6 @@ class RedisManager(object):
             pipeline.delete('{}:weblab:tasks:{}'.format(self.key_base, task_id))
             pipeline.delete('{}:weblab:task_ids:{}'.format(self.key_base, task_id))
             pipeline.delete('{}:weblab:task_ids:active:{}'.format(self.key_base, task_id))
+            if self._index_writes:
+                pipeline.srem(self._pending_tasks_index_key, task_id)
         pipeline.execute()

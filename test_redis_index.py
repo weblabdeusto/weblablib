@@ -6,10 +6,10 @@ import unittest
 import uuid
 
 import redis
-from click.testing import CliRunner
 from flask import Flask
 
 import weblablib
+import weblablib.backends.redis_manager as redis_manager_module
 from weblablib.backends.redis_manager import RedisManager
 from weblablib.exc import AlreadyRunningError, InvalidConfigError
 
@@ -70,6 +70,56 @@ class FakeCurrentUser(object):
 
 class FakeExpiredUser(FakeCurrentUser):
     pass
+
+
+class ClientProxy(object):
+    def __init__(self, client, **overrides):
+        self._client = client
+        self._overrides = overrides
+
+    def __getattr__(self, name):
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(self._client, name)
+
+
+class PipelineResultProxy(object):
+    def __init__(self, pipeline, mutate_results):
+        self._pipeline = pipeline
+        self._mutate_results = mutate_results
+
+    def __getattr__(self, name):
+        return getattr(self._pipeline, name)
+
+    def execute(self):
+        results = self._pipeline.execute()
+        self._mutate_results(results)
+        return results
+
+
+class WatchErrorOnceClient(ClientProxy):
+    def __init__(self, client):
+        super(WatchErrorOnceClient, self).__init__(client)
+        self.pipeline_calls = 0
+
+    def pipeline(self):
+        self.pipeline_calls += 1
+        pipeline = self._client.pipeline()
+        if self.pipeline_calls != 1:
+            return pipeline
+
+        def raise_watch_error(results):
+            raise redis.exceptions.WatchError()
+
+        return PipelineResultProxy(pipeline, raise_watch_error)
+
+
+class InvalidText(object):
+    def __str__(self):
+        raise ValueError('cannot stringify')
+
+    def __unicode__(self):
+        raise ValueError('cannot stringify')
 
 
 class BaseRedisIndexTest(unittest.TestCase):
@@ -162,6 +212,19 @@ class RedisIndexConfigurationTest(BaseRedisIndexTest):
         with self.assertRaises(InvalidConfigError):
             self.manager('indexed', '')
 
+        manager = self.manager()
+        with self.assertRaises(InvalidConfigError):
+            manager._normalize_index_mode(InvalidText())
+        with self.assertRaises(InvalidConfigError):
+            manager._normalize_index_epoch(InvalidText())
+
+    def test_scan_count_validation(self):
+        manager = self.manager()
+        with self.assertRaises(InvalidConfigError):
+            manager.redis_index_status(scan_count='invalid')
+        with self.assertRaises(InvalidConfigError):
+            manager.redis_index_status(scan_count=0)
+
     def test_shadow_initializes_versioned_sets_outside_legacy_patterns(self):
         manager = self.manager('shadow', 'epoch-1')
         self.assertEqual(manager.index_mode, 'shadow')
@@ -180,6 +243,69 @@ class RedisIndexConfigurationTest(BaseRedisIndexTest):
         with self.assertRaises(InvalidConfigError):
             self.manager('shadow', 'epoch-1')
         self.assertEqual(self.client.type(self.pending_index_key), 'none')
+
+    def test_wrong_ready_and_lock_types_refuse_shadow_startup(self):
+        for key in (self.ready_key, self.lock_key):
+            self.client.delete(key)
+            self.client.sadd(key, 'wrong-type')
+            with self.assertRaises(InvalidConfigError):
+                self.manager('shadow', 'epoch-1')
+
+    def test_preflight_rejects_unknown_policy_and_cluster(self):
+        manager = self.manager()
+        manager.client = ClientProxy(
+            self.client, config_get=lambda *args, **kwargs: {})
+        with self.assertRaises(InvalidConfigError):
+            manager._preflight_redis_index()
+
+        manager.client = ClientProxy(
+            self.client,
+            config_get=lambda *args, **kwargs: {
+                'maxmemory-policy': 'noeviction'},
+            info=lambda *args, **kwargs: {'cluster_enabled': 1})
+        with self.assertRaises(InvalidConfigError):
+            manager._preflight_redis_index()
+
+    def test_preflight_wraps_redis_command_errors(self):
+        manager = self.manager()
+
+        def denied(*args, **kwargs):
+            raise redis.exceptions.ResponseError('command denied')
+
+        manager.client = ClientProxy(self.client, config_get=denied)
+        with self.assertRaises(InvalidConfigError) as context:
+            manager._preflight_redis_index()
+        self.assertIn('configured index mode', str(context.exception))
+
+    def test_preflight_uses_an_isolated_set_command_probe(self):
+        manager = self.manager()
+        original_pipeline = self.client.pipeline
+
+        def pipeline():
+            def mutate(results):
+                results[2] = set()
+            return PipelineResultProxy(original_pipeline(), mutate)
+
+        manager.client = ClientProxy(self.client, pipeline=pipeline)
+        with self.assertRaises(InvalidConfigError) as context:
+            manager._preflight_redis_index()
+        self.assertEqual(str(context.exception),
+                         'Redis set command probe failed')
+        self.assertEqual(self.client.keys(
+            '{}:weblab:index:v1:command-probe:*'.format(self.key_base)), [])
+
+    def test_prepared_index_with_missing_sentinel_refuses_startup(self):
+        self.prepare_index('epoch-1')
+        self.client.sadd(self.active_index_key, 'stale-member')
+        self.client.srem(self.active_index_key, INDEX_SENTINEL)
+
+        with self.assertRaises(InvalidConfigError):
+            self.manager('shadow', 'epoch-1')
+        with self.assertRaises(InvalidConfigError):
+            self.manager('indexed', 'epoch-1')
+
+        self.assertNotIn(INDEX_SENTINEL,
+                         self.client.smembers(self.active_index_key))
 
     def test_allkeys_eviction_refuses_opt_in_modes(self):
         original_policy = self.client.config_get('maxmemory-policy')['maxmemory-policy']
@@ -201,6 +327,20 @@ class RedisIndexConfigurationTest(BaseRedisIndexTest):
         self.manager('indexed', 'epoch-1')
         with self.assertRaises(InvalidConfigError):
             self.manager('indexed', 'epoch-2')
+
+    def test_failed_indexed_startup_cannot_recreate_a_lost_prepared_index(self):
+        self.seed_session('expired')
+        self.prepare_index('epoch-1')
+        running_manager = self.manager('indexed', 'epoch-1')
+        self.client.delete(self.active_index_key)
+
+        with self.assertRaises(InvalidConfigError):
+            self.manager('shadow', 'epoch-1')
+        with self.assertRaises(InvalidConfigError):
+            self.manager('indexed', 'epoch-1')
+
+        self.assertEqual(self.client.type(self.active_index_key), 'none')
+        self.assertEqual(running_manager.find_expired_sessions(), ['expired'])
 
 
 class RedisIndexWriteTest(BaseRedisIndexTest):
@@ -262,6 +402,82 @@ class RedisIndexMigrationTest(BaseRedisIndexTest):
         self.assertIn('stale-session', self.client.smembers(self.active_index_key))
         self.assertIn('stale-task', self.client.smembers(self.pending_index_key))
 
+    def test_status_excludes_partial_legacy_records(self):
+        shadow = self.manager('shadow', 'epoch-1')
+        partial_session_key = '{}:weblab:active:partial'.format(self.key_base)
+        self.client.hset(partial_session_key, 'max_date', 1000)
+        self.client.set('{}:weblab:task_ids:active:partial'.format(
+            self.key_base), 'partial')
+
+        status = shadow.redis_index_status(scan_count=10)
+
+        self.assertEqual(status['active_sessions']['expected'], 0)
+        self.assertEqual(status['pending_tasks']['expected'], 0)
+
+    def test_status_reports_missing_sets_wrong_types_and_command_errors(self):
+        manager = self.manager()
+        errors = []
+        members, sentinel = manager._read_index_set('missing', errors)
+        self.assertEqual(members, set())
+        self.assertFalse(sentinel)
+        self.assertEqual(errors, [])
+
+        wrong_type_key = '{}:wrong-type'.format(self.key_base)
+        self.client.set(wrong_type_key, 'value')
+        members, sentinel = manager._read_index_set(wrong_type_key, errors)
+        self.assertEqual(members, set())
+        self.assertFalse(sentinel)
+        self.assertIn('unexpected_type', errors)
+
+        def denied_type(*args, **kwargs):
+            raise redis.exceptions.ResponseError('command denied')
+
+        manager.client = ClientProxy(self.client, type=denied_type)
+        members, sentinel = manager._read_index_set('unreadable', errors)
+        self.assertEqual(members, set())
+        self.assertFalse(sentinel)
+        self.assertIn('ResponseError', errors)
+
+    def test_status_reports_unsafe_server_settings(self):
+        manager = self.manager()
+        manager.client = ClientProxy(
+            self.client,
+            config_get=lambda *args, **kwargs: {
+                'maxmemory-policy': 'allkeys-lru'},
+            info=lambda *args, **kwargs: {'cluster_enabled': 1})
+
+        status = manager.redis_index_status(scan_count=10)
+
+        self.assertFalse(status['ok'])
+        self.assertIn('unsupported_eviction_policy', status['errors'])
+        self.assertIn('redis_cluster_unsupported', status['errors'])
+
+        manager.client = ClientProxy(
+            self.client, config_get=lambda *args, **kwargs: {})
+        status = manager.redis_index_status(scan_count=10)
+        self.assertIn('maxmemory_policy_unknown', status['errors'])
+
+    def test_status_reports_scan_and_readiness_command_errors(self):
+        manager = self.manager()
+
+        def failed_scan(*args, **kwargs):
+            raise redis.exceptions.ConnectionError('offline')
+
+        manager.client = ClientProxy(self.client, scan_iter=failed_scan)
+        status = manager.redis_index_status(scan_count=10)
+        self.assertFalse(status['ok'])
+        self.assertIn('ConnectionError', status['errors'])
+
+        def failed_ready_get(key, *args, **kwargs):
+            if key == self.ready_key:
+                raise redis.exceptions.ResponseError('command denied')
+            return self.client.get(key, *args, **kwargs)
+
+        manager.client = ClientProxy(self.client, get=failed_ready_get)
+        status = manager.redis_index_status(scan_count=10)
+        self.assertFalse(status['ok'])
+        self.assertIn('ResponseError', status['errors'])
+
     def test_prepare_reconciles_indices_and_sets_readiness(self):
         shadow = self.manager('shadow', 'epoch-1')
         self.seed_session('session')
@@ -292,6 +508,11 @@ class RedisIndexMigrationTest(BaseRedisIndexTest):
         with self.assertRaises(AlreadyRunningError):
             shadow.prepare_redis_index()
 
+        for invalid_ttl in ('invalid', 0):
+            self.client.delete(self.lock_key)
+            with self.assertRaises(InvalidConfigError):
+                shadow.prepare_redis_index(lock_ttl=invalid_ttl)
+
     def test_prepare_does_not_include_missing_hash_or_running_task(self):
         shadow = self.manager('shadow', 'epoch-1')
         self.client.set('{}:weblab:task_ids:active:ghost'.format(self.key_base),
@@ -303,6 +524,79 @@ class RedisIndexMigrationTest(BaseRedisIndexTest):
         self.assertTrue(result['ready'])
         self.assertEqual(self.client.smembers(self.pending_index_key),
                          set([INDEX_SENTINEL]))
+
+    def test_prepare_batches_large_reconciliation(self):
+        shadow = self.manager('shadow', 'epoch-1')
+        for number in range(25):
+            self.seed_session('session-{}'.format(number))
+            self.seed_task('task-{}'.format(number))
+
+        status = shadow.prepare_redis_index(scan_count=10)
+
+        self.assertTrue(status['ready'])
+        self.assertEqual(status['active_sessions']['indexed'], 25)
+        self.assertEqual(status['pending_tasks']['indexed'], 25)
+
+    def test_prepare_fails_closed_when_parity_never_converges(self):
+        shadow = self.manager('shadow', 'epoch-1')
+        self.seed_session('missing')
+        original_reconcile = shadow._reconcile_redis_indices
+        shadow._reconcile_redis_indices = lambda scan_count: None
+        try:
+            with self.assertRaises(InvalidConfigError):
+                shadow.prepare_redis_index(scan_count=10)
+        finally:
+            shadow._reconcile_redis_indices = original_reconcile
+
+        self.assertFalse(self.client.exists(self.ready_key))
+        self.assertFalse(self.client.exists(self.lock_key))
+
+    def test_prepare_clears_readiness_if_final_verification_changes(self):
+        shadow = self.manager('shadow', 'epoch-1')
+        original_status = shadow.redis_index_status
+        calls = [0]
+
+        def changed_status(scan_count=500):
+            calls[0] += 1
+            status = original_status(scan_count)
+            if calls[0] == 2:
+                status['ready'] = False
+            return status
+
+        shadow.redis_index_status = changed_status
+        with self.assertRaises(InvalidConfigError):
+            shadow.prepare_redis_index(scan_count=10)
+        self.assertFalse(self.client.exists(self.ready_key))
+
+    def test_prepare_does_not_delete_readiness_replaced_by_another_owner(self):
+        shadow = self.manager('shadow', 'epoch-1')
+        original_status = shadow.redis_index_status
+        calls = [0]
+
+        def changed_status(scan_count=500):
+            calls[0] += 1
+            status = original_status(scan_count)
+            if calls[0] == 2:
+                self.client.set(self.ready_key, 'replacement-epoch')
+                status['ready'] = False
+            return status
+
+        shadow.redis_index_status = changed_status
+        with self.assertRaises(InvalidConfigError):
+            shadow.prepare_redis_index(scan_count=10)
+        self.assertEqual(self.client.get(self.ready_key), 'replacement-epoch')
+
+    def test_lock_release_preserves_changed_owner_and_retries_watch_error(self):
+        shadow = self.manager('shadow', 'epoch-1')
+        self.client.set(self.lock_key, 'other-owner')
+        shadow._release_index_lock('original-owner')
+        self.assertEqual(self.client.get(self.lock_key), 'other-owner')
+
+        self.client.set(self.lock_key, 'owner')
+        shadow.client = WatchErrorOnceClient(self.client)
+        shadow._release_index_lock('owner')
+        self.assertEqual(shadow.client.pipeline_calls, 2)
+        self.assertFalse(self.client.exists(self.lock_key))
 
 
 class RedisIndexedReadTest(BaseRedisIndexTest):
@@ -370,6 +664,63 @@ class RedisIndexedReadTest(BaseRedisIndexTest):
         self.client.set(self.active_index_key, 'wrong-type')
         self.assertEqual(manager.find_expired_sessions(), ['expired'])
 
+    def test_epoch_loss_falls_back_for_tasks_without_keys_on_healthy_path(self):
+        self.seed_task('pending')
+        manager = self.indexed_manager()
+        self.client.set(self.ready_key, 'different-epoch')
+
+        self.assertEqual(manager.get_tasks_not_started(), ['pending'])
+        self.assertEqual(len(self.logger.critical_messages), 1)
+        self.assertIn('epoch_not_ready', self.logger.critical_messages[0])
+
+    def test_stale_session_is_pruned_and_prune_failure_is_nonfatal(self):
+        manager = self.indexed_manager()
+        self.client.sadd(self.active_index_key, 'stale')
+        original_srem = manager.client.srem
+
+        def failed_srem(*args, **kwargs):
+            raise redis.exceptions.ResponseError('command denied')
+
+        manager.client.srem = failed_srem
+        try:
+            self.assertEqual(manager.find_expired_sessions(), [])
+        finally:
+            manager.client.srem = original_srem
+
+        self.assertIn('stale', self.client.smembers(self.active_index_key))
+        self.assertEqual(len(self.logger.critical_messages), 1)
+        self.assertIn('prune_failed', self.logger.critical_messages[0])
+
+    def test_shadow_parity_error_is_nonfatal_and_rate_limited(self):
+        manager = self.manager('shadow', 'epoch-1')
+        self.seed_task('pending')
+        original_smembers = manager.client.smembers
+
+        def failed_smembers(*args, **kwargs):
+            raise redis.exceptions.ResponseError('command denied')
+
+        manager.client.smembers = failed_smembers
+        try:
+            self.assertEqual(manager.get_tasks_not_started(), ['pending'])
+            self.assertEqual(manager.get_tasks_not_started(), ['pending'])
+        finally:
+            manager.client.smembers = original_smembers
+
+        self.assertEqual(len(self.logger.warning_messages), 1)
+        self.assertIn('shadow_parity_error', self.logger.warning_messages[0])
+
+    def test_index_event_without_logger_is_nonfatal(self):
+        manager = self.manager()
+        manager.weblab = object()
+        self.assertFalse(manager._emit_index_event(
+            'critical', 'legacy_fallback', 'pending_tasks'))
+
+    def test_test_cleanup_removes_indexed_session_member(self):
+        manager = self.manager('shadow', 'epoch-1')
+        manager.add_user('session', FakeCurrentUser(), 60)
+        manager._tests_delete_user('session')
+        self.assertNotIn('session', self.client.smembers(self.active_index_key))
+
 
 class RedisIndexFlaskIntegrationTest(BaseRedisIndexTest):
     def create_app(self, config=None):
@@ -422,7 +773,7 @@ class RedisIndexFlaskIntegrationTest(BaseRedisIndexTest):
             'WEBLAB_REDIS_INDEX_EPOCH': 'epoch-1',
         })
         self.seed_session('session')
-        runner = CliRunner()
+        runner = app.test_cli_runner()
 
         status_result = runner.invoke(app.cli, [
             'weblab', 'redis-index', 'status', '--json'])
@@ -436,6 +787,44 @@ class RedisIndexFlaskIntegrationTest(BaseRedisIndexTest):
         self.assertEqual(prepare_result.exit_code, 0, prepare_result.output)
         prepared = json.loads(prepare_result.output)
         self.assertTrue(prepared['ready'])
+        extension._cleanup()
+
+    def test_cli_human_output_error_exit_and_custom_backend(self):
+        app, extension = self.create_app({
+            'WEBLAB_REDIS_INDEX_MODE': 'shadow',
+            'WEBLAB_REDIS_INDEX_EPOCH': 'epoch-1',
+        })
+        runner = app.test_cli_runner()
+
+        status_result = runner.invoke(app.cli, [
+            'weblab', 'redis-index', 'status'])
+        self.assertEqual(status_result.exit_code, 0, status_result.output)
+        self.assertIn('Mode: shadow', status_result.output)
+        self.assertIn('Active sessions:', status_result.output)
+        self.assertIn('Pending tasks:', status_result.output)
+
+        prepare_result = runner.invoke(app.cli, [
+            'weblab', 'redis-index', 'prepare', '--scan-count', '10'])
+        self.assertEqual(prepare_result.exit_code, 0, prepare_result.output)
+        self.assertIn('Ready: yes', prepare_result.output)
+
+        original_policy = self.client.config_get(
+            'maxmemory-policy')['maxmemory-policy']
+        try:
+            self.client.config_set('maxmemory-policy', 'allkeys-lru')
+            error_result = runner.invoke(app.cli, [
+                'weblab', 'redis-index', 'status'])
+            self.assertEqual(error_result.exit_code, 1, error_result.output)
+            self.assertIn('Errors: unsupported_eviction_policy',
+                          error_result.output)
+        finally:
+            self.client.config_set('maxmemory-policy', original_policy)
+
+        extension._backend = object()
+        custom_result = runner.invoke(app.cli, [
+            'weblab', 'redis-index', 'status'])
+        self.assertNotEqual(custom_result.exit_code, 0)
+        self.assertIn('does not provide Redis indices', custom_result.output)
         extension._cleanup()
 
 

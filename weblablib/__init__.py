@@ -449,6 +449,57 @@ class WebLab(object):
             """
             self.run_tasks()
 
+        def _redis_index_backend():
+            if not hasattr(self._backend, 'redis_index_status'):
+                raise click.ClickException(
+                    'The configured WebLab backend does not provide Redis indices')
+            return self._backend
+
+        def _print_redis_index_status(status, as_json):
+            if as_json:
+                click.echo(json.dumps(status, sort_keys=True))
+                return
+            click.echo('Mode: {}'.format(status['mode']))
+            click.echo('Epoch: {}'.format(status['epoch'] or '-'))
+            click.echo('Ready: {}'.format('yes' if status['ready'] else 'no'))
+            click.echo('Active sessions: expected={expected} indexed={indexed} '
+                       'missing={missing} stale={stale}'.format(
+                           **status['active_sessions']))
+            click.echo('Pending tasks: expected={expected} indexed={indexed} '
+                       'missing={missing} stale={stale}'.format(
+                           **status['pending_tasks']))
+            if status['errors']:
+                click.echo('Errors: {}'.format(', '.join(status['errors'])))
+
+        @weblab_cli.group('redis-index')
+        def redis_index():
+            """Inspect and prepare the optional Redis discovery indices."""
+            pass
+
+        @redis_index.command('status')
+        @click.option('--scan-count', default=500, type=int, show_default=True,
+                      help='Redis SCAN count hint')
+        @click.option('--json', 'as_json', is_flag=True,
+                      help='Emit machine-readable JSON')
+        def redis_index_status(scan_count, as_json):
+            """Report Redis index readiness and parity without changing data."""
+            status = _redis_index_backend().redis_index_status(
+                scan_count=scan_count)
+            _print_redis_index_status(status, as_json)
+            if not status['ok']:
+                raise click.exceptions.Exit(1)
+
+        @redis_index.command('prepare')
+        @click.option('--scan-count', default=500, type=int, show_default=True,
+                      help='Redis SCAN count hint')
+        @click.option('--json', 'as_json', is_flag=True,
+                      help='Emit machine-readable JSON')
+        def prepare_redis_index(scan_count, as_json):
+            """Backfill and verify Redis indices while running in shadow mode."""
+            status = _redis_index_backend().prepare_redis_index(
+                scan_count=scan_count)
+            _print_redis_index_status(status, as_json)
+
         @weblab_cli.command('loop')
         @click.option('--threads', default=5, help="Number of threads")
         @click.option('--reload/--no-reload', default=None, help="Reload as code changes. Defaults to whether the app is in FLASK_DEBUG mode")
