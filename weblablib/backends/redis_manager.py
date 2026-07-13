@@ -9,11 +9,18 @@ import json
 import time
 
 import redis
+import six
 from flask import current_app
 
 from weblablib.config import ConfigurationKeys
+from weblablib.exc import InvalidConfigError
 from weblablib.utils import create_token, _current_timestamp
 from weblablib.users import AnonymousUser, CurrentUser, ExpiredUser
+
+
+REDIS_INDEX_MODES = ('legacy', 'shadow', 'indexed')
+REDIS_INDEX_SENTINEL = '__weblablib_index_v1__'
+REDIS_INDEX_PROBE_MEMBER = '__weblablib_index_v1_probe__'
 
 
 class RedisManager(object):
@@ -34,12 +41,123 @@ class RedisManager(object):
     - ...
     """
 
-    def __init__(self, redis_url, key_base, task_expires, weblab):
+    def __init__(self, redis_url, key_base, task_expires, weblab,
+                 index_mode='legacy', index_epoch=None):
         self.client = redis.StrictRedis.from_url(redis_url, decode_responses=True)
         self.weblab = weblab
         self.key_base = key_base  # Redis base prefix to use. It is *not* user or session specific.
 
         self.task_expires = task_expires
+        self.index_mode = self._normalize_index_mode(index_mode)
+        self.index_epoch = self._normalize_index_epoch(index_epoch)
+        self._active_sessions_index_key = '{}:weblab:index:v1:active_sessions'.format(key_base)
+        self._pending_tasks_index_key = '{}:weblab:index:v1:pending_tasks'.format(key_base)
+        self._index_ready_key = '{}:weblab:index:v1:ready'.format(key_base)
+        self._index_lock_key = '{}:weblab:index:v1:migration_lock'.format(key_base)
+
+        if self.index_mode != 'legacy':
+            if not self.index_epoch:
+                raise InvalidConfigError(
+                    'WEBLAB_REDIS_INDEX_EPOCH is required in {} mode'.format(
+                        self.index_mode))
+            self._preflight_redis_index()
+            if self.index_mode == 'indexed':
+                self._validate_indexed_readiness()
+
+    def _normalize_index_mode(self, index_mode):
+        try:
+            normalized = six.text_type(index_mode or 'legacy').strip().lower()
+        except (TypeError, ValueError):
+            raise InvalidConfigError('Invalid WEBLAB_REDIS_INDEX_MODE')
+        if normalized not in REDIS_INDEX_MODES:
+            raise InvalidConfigError(
+                'WEBLAB_REDIS_INDEX_MODE must be one of: {}'.format(
+                    ', '.join(REDIS_INDEX_MODES)))
+        return normalized
+
+    def _normalize_index_epoch(self, index_epoch):
+        if index_epoch is None:
+            return None
+        try:
+            return six.text_type(index_epoch).strip()
+        except (TypeError, ValueError):
+            raise InvalidConfigError('Invalid WEBLAB_REDIS_INDEX_EPOCH')
+
+    def _preflight_redis_index(self):
+        try:
+            policy_config = self.client.config_get('maxmemory-policy')
+            policy = policy_config.get('maxmemory-policy')
+            if not policy:
+                raise InvalidConfigError(
+                    'Could not determine Redis maxmemory-policy')
+            if policy.startswith('allkeys-'):
+                raise InvalidConfigError(
+                    'Redis index modes do not support {} eviction'.format(policy))
+
+            cluster_info = self.client.info('cluster')
+            if int(cluster_info.get('cluster_enabled', 0)):
+                raise InvalidConfigError(
+                    'Redis Cluster is not supported by the WebLabLib backend')
+
+            expected_types = (
+                (self._active_sessions_index_key, ('none', 'set')),
+                (self._pending_tasks_index_key, ('none', 'set')),
+                (self._index_ready_key, ('none', 'string')),
+                (self._index_lock_key, ('none', 'string')),
+            )
+            observed_types = []
+            for key, allowed_types in expected_types:
+                key_type = self.client.type(key)
+                observed_types.append((key, key_type, allowed_types))
+            for key, key_type, allowed_types in observed_types:
+                if key_type not in allowed_types:
+                    raise InvalidConfigError(
+                        'Unexpected Redis type {} for internal index key'.format(
+                            key_type))
+
+            # SCAN is management-only, but verify it before allowing a mode
+            # that can later be marked ready.
+            self.client.scan(cursor=0,
+                             match='{}:weblab:index:v1:command-probe:*'.format(
+                                 self.key_base),
+                             count=1)
+
+            pipeline = self.client.pipeline()
+            pipeline.sadd(self._active_sessions_index_key, REDIS_INDEX_SENTINEL)
+            pipeline.sadd(self._pending_tasks_index_key, REDIS_INDEX_SENTINEL)
+            pipeline.sadd(self._active_sessions_index_key,
+                          REDIS_INDEX_PROBE_MEMBER)
+            pipeline.smembers(self._active_sessions_index_key)
+            pipeline.smembers(self._pending_tasks_index_key)
+            pipeline.srem(self._active_sessions_index_key,
+                          REDIS_INDEX_PROBE_MEMBER)
+            results = pipeline.execute()
+            if REDIS_INDEX_SENTINEL not in results[3]:
+                raise InvalidConfigError('Active-session index probe failed')
+            if REDIS_INDEX_SENTINEL not in results[4]:
+                raise InvalidConfigError('Pending-task index probe failed')
+        except InvalidConfigError:
+            raise
+        except redis.exceptions.RedisError as error:
+            raise InvalidConfigError(
+                'Redis does not support the configured index mode: {}'.format(
+                    error))
+
+    def _validate_indexed_readiness(self):
+        try:
+            ready_epoch = self.client.get(self._index_ready_key)
+            active_ready = self.client.sismember(
+                self._active_sessions_index_key, REDIS_INDEX_SENTINEL)
+            pending_ready = self.client.sismember(
+                self._pending_tasks_index_key, REDIS_INDEX_SENTINEL)
+        except redis.exceptions.RedisError as error:
+            raise InvalidConfigError(
+                'Could not validate Redis index readiness: {}'.format(error))
+
+        if ready_epoch != self.index_epoch or not active_ready or not pending_ready:
+            raise InvalidConfigError(
+                'Redis indices are not prepared for epoch {}'.format(
+                    self.index_epoch))
 
     def add_user(self, session_id, user, expiration):
         """

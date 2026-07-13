@@ -53,6 +53,16 @@ class ConfigurationKeys(object):
     # it's lab, so all the keys will be "lab:weblab:active:session-id", for example
     WEBLAB_REDIS_BASE = 'WEBLAB_REDIS_BASE'
 
+    # Redis discovery mode. "legacy" keeps the historical KEYS-based behavior,
+    # "shadow" maintains indices while legacy reads remain authoritative, and
+    # "indexed" uses prepared indices for discovery.
+    WEBLAB_REDIS_INDEX_MODE = 'WEBLAB_REDIS_INDEX_MODE'
+
+    # Deployment-controlled generation identifier for Redis indices. Required
+    # in shadow and indexed modes so rollback and re-upgrade require a new
+    # reconciliation pass.
+    WEBLAB_REDIS_INDEX_EPOCH = 'WEBLAB_REDIS_INDEX_EPOCH'
+
     # How long the results of the tasks should be stored in Redis? In seconds.
     # By default one hour.
     WEBLAB_TASK_EXPIRES = 'WEBLAB_TASK_EXPIRES'

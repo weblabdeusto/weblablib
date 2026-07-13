@@ -225,7 +225,18 @@ class WebLab(object):
             redis_url = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_URL, 'redis://localhost:6379/0')
             redis_base = self._app.config.get(ConfigurationKeys.WEBLAB_REDIS_BASE, 'lab')
             task_expires = self._app.config.get(ConfigurationKeys.WEBLAB_TASK_EXPIRES, 3600)
-            self._backend = RedisManager(redis_url, redis_base, task_expires, self)
+            if ConfigurationKeys.WEBLAB_REDIS_INDEX_MODE in self._app.config:
+                redis_index_mode = self._app.config[ConfigurationKeys.WEBLAB_REDIS_INDEX_MODE]
+            else:
+                redis_index_mode = os.environ.get(ConfigurationKeys.WEBLAB_REDIS_INDEX_MODE,
+                                                  'legacy')
+            if ConfigurationKeys.WEBLAB_REDIS_INDEX_EPOCH in self._app.config:
+                redis_index_epoch = self._app.config[ConfigurationKeys.WEBLAB_REDIS_INDEX_EPOCH]
+            else:
+                redis_index_epoch = os.environ.get(ConfigurationKeys.WEBLAB_REDIS_INDEX_EPOCH)
+            self._backend = RedisManager(redis_url, redis_base, task_expires, self,
+                                         index_mode=redis_index_mode,
+                                         index_epoch=redis_index_epoch)
 
         #
         # Initialize session settings
