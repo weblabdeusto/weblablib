@@ -56,6 +56,7 @@ class RedisManager(object):
         self._index_lock_key = '{}:weblab:index:v1:migration_lock'.format(key_base)
         self._index_writes = self.index_mode in ('shadow', 'indexed')
         self._index_log_times = {}
+        self._index_runtime_unsafe = False
 
         if self.index_mode != 'legacy':
             if not self.index_epoch:
@@ -158,6 +159,17 @@ class RedisManager(object):
                 raise InvalidConfigError('Redis string command probe failed')
             if results[8] != [REDIS_INDEX_PROBE_MEMBER, None]:
                 raise InvalidConfigError('Redis hash command probe failed')
+
+            watch_probe_key = '{}:watch'.format(probe_key)
+            self.client.execute_command('UNWATCH')
+            watch_pipeline = self.client.pipeline()
+            try:
+                watch_pipeline.watch(watch_probe_key)
+                watch_pipeline.multi()
+                watch_pipeline.delete(watch_probe_key)
+                watch_pipeline.execute()
+            finally:
+                watch_pipeline.reset()
 
             if self.index_mode == 'shadow' and ready_epoch is None:
                 pipeline = self.client.pipeline()
@@ -487,6 +499,11 @@ class RedisManager(object):
             stale_count=len(indexed_ids - expected_ids))
 
     def _indexed_members(self, kind):
+        if self._index_runtime_unsafe:
+            self._emit_index_event(
+                'critical', 'legacy_fallback', kind,
+                reason='runtime_index_unsafe')
+            return None
         if kind == 'active_sessions':
             index_key = self._active_sessions_index_key
         else:
@@ -514,6 +531,7 @@ class RedisManager(object):
         return members
 
     def _invalidate_index_readiness(self, kind, action, reason):
+        self._index_runtime_unsafe = True
         fields = {}
         try:
             self.client.delete(self._index_ready_key)

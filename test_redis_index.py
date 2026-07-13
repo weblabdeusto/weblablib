@@ -110,6 +110,18 @@ class DeniedSaddPipeline(object):
         return self
 
 
+class DeniedWatchPipeline(object):
+    def __init__(self, pipeline):
+        self._pipeline = pipeline
+
+    def __getattr__(self, name):
+        return getattr(self._pipeline, name)
+
+    def watch(self, *keys):
+        del keys
+        raise redis.exceptions.ResponseError('command denied')
+
+
 class WatchErrorOnceClient(ClientProxy):
     def __init__(self, client):
         super(WatchErrorOnceClient, self).__init__(client)
@@ -312,6 +324,35 @@ class RedisIndexConfigurationTest(BaseRedisIndexTest):
         self.assertEqual(self.client.keys(
             '{}:weblab:index:v1:command-probe:*'.format(self.key_base)), [])
 
+    def test_preflight_requires_migration_watch_permission(self):
+        manager = self.manager()
+        original_pipeline = self.client.pipeline
+        manager.client = ClientProxy(
+            self.client,
+            pipeline=lambda: DeniedWatchPipeline(original_pipeline()))
+
+        with self.assertRaises(InvalidConfigError) as context:
+            manager._preflight_redis_index()
+
+        self.assertIn('configured index mode', str(context.exception))
+        self.assertEqual(self.client.keys(
+            '{}:weblab:index:v1:command-probe:*'.format(self.key_base)), [])
+
+    def test_preflight_requires_migration_unwatch_permission(self):
+        manager = self.manager()
+
+        def denied_unwatch(*args, **kwargs):
+            del args, kwargs
+            raise redis.exceptions.ResponseError('command denied')
+
+        manager.client = ClientProxy(
+            self.client, execute_command=denied_unwatch)
+
+        with self.assertRaises(InvalidConfigError) as context:
+            manager._preflight_redis_index()
+
+        self.assertIn('configured index mode', str(context.exception))
+
     def test_prepared_index_with_missing_sentinel_refuses_startup(self):
         self.prepare_index('epoch-1')
         self.client.sadd(self.active_index_key, 'stale-member')
@@ -439,6 +480,30 @@ class RedisIndexWriteTest(BaseRedisIndexTest):
         self.assertIsNone(self.client.get(self.ready_key))
         self.assertEqual(len(self.logger.critical_messages), 1)
         self.assertIn('index_write_failed', self.logger.critical_messages[0])
+
+    def test_failed_readiness_delete_keeps_process_on_legacy_discovery(self):
+        self.prepare_index('epoch-1')
+        manager = self.manager('indexed', 'epoch-1')
+        original_pipeline = self.client.pipeline
+
+        def denied_delete(*args, **kwargs):
+            del args, kwargs
+            raise redis.exceptions.ResponseError('command denied')
+
+        manager.client = ClientProxy(
+            self.client,
+            pipeline=lambda: DeniedSaddPipeline(original_pipeline()),
+            delete=denied_delete)
+
+        with self.assertRaises(redis.exceptions.ResponseError):
+            manager.add_user('partial-session', FakeCurrentUser(), 60)
+
+        self.assertEqual(self.client.get(self.ready_key), 'epoch-1')
+        self.assertNotIn('partial-session', self.client.smembers(
+            self.active_index_key))
+        self.assertEqual(manager.find_expired_sessions(), ['partial-session'])
+        self.assertIn('readiness_invalidation_error',
+                      self.logger.critical_messages[0])
 
 
 class RedisIndexMigrationTest(BaseRedisIndexTest):
@@ -833,6 +898,29 @@ class RedisIndexedReadTest(BaseRedisIndexTest):
 
         self.client.set(self.active_index_key, 'wrong-type')
         self.assertEqual(manager.find_expired_sessions(), ['expired'])
+
+    def test_index_member_read_error_falls_back_and_latches_legacy(self):
+        self.seed_task('pending')
+        manager = self.indexed_manager()
+        original_pipeline = self.client.pipeline
+        pipeline_calls = []
+
+        def fail_first_pipeline():
+            pipeline = original_pipeline()
+            pipeline_calls.append(True)
+            if len(pipeline_calls) == 1:
+                def raise_error(results):
+                    del results
+                    raise redis.exceptions.ResponseError('command denied')
+                return PipelineResultProxy(pipeline, raise_error)
+            return pipeline
+
+        manager.client = ClientProxy(self.client, pipeline=fail_first_pipeline)
+
+        self.assertEqual(manager.get_tasks_not_started(), ['pending'])
+        self.assertIsNone(self.client.get(self.ready_key))
+        self.assertTrue(manager._index_runtime_unsafe)
+        self.assertEqual(len(pipeline_calls), 2)
 
     def test_indexed_task_validation_error_falls_back_and_invalidates_readiness(self):
         self.seed_task('pending')

@@ -110,9 +110,10 @@ If readiness or an index set disappears at runtime, or candidate validation
 fails, an indexed read invalidates readiness, emits a rate-limited critical
 event, and falls back to legacy discovery for that call. An index-maintaining
 write failure also invalidates readiness and preserves the Redis error for the
-caller. Return the affected Redis base to ``shadow`` and repeat preparation
-before using ``indexed`` again. Normal healthy indexed cleaner and task-runner
-paths do not issue ``KEYS`` or ``SCAN``.
+caller. The affected process remains on legacy discovery until it is restarted.
+Return the affected Redis base to ``shadow``, restart its processes, and repeat
+preparation before using ``indexed`` again. Normal healthy indexed cleaner and
+task-runner paths do not issue ``KEYS`` or ``SCAN``.
 
 Session management
 ------------------
