@@ -6,7 +6,7 @@ Changelog
 Version 0.5.9
 -------------
 
-Date: pending final release
+Date: July 16th, 2026
 
 Changes
 ^^^^^^^
