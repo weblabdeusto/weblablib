@@ -34,7 +34,9 @@ def _current_session_id():
     return _current_weblab()._session_id()
 
 def _to_timestamp(dtime):
-    return str(int(time.mktime(dtime.timetuple()))) + str(dtime.microsecond / 1e6)[1:]
+    # Small fractions use scientific notation with str(), so concatenating
+    # their suffix can scale the whole Unix timestamp down by 1e-5 or 1e-6.
+    return '{:.6f}'.format(time.mktime(dtime.timetuple()) + dtime.microsecond / 1e6)
 
 def _current_timestamp():
     return float(_to_timestamp(datetime.datetime.now()))
