@@ -59,8 +59,10 @@ import redis
 import click
 import requests
 
+from markupsafe import Markup
+
 from flask import jsonify, request, current_app, redirect, \
-     url_for, g, session, after_this_request, render_template, Markup, \
+     url_for, g, session, after_this_request, render_template, \
      has_request_context, has_app_context
 
 from weblablib.exc import WebLabError, NoContextError, InvalidConfigError, \
@@ -99,7 +101,7 @@ __all__ = ['WebLab',
            'AlreadyRunningError', 'CurrentUser', 'AnonymousUser',
            'ExpiredUser']
 
-__version__ = '0.5.9'
+__version__ = '0.5.11'
 __license__ = 'GNU Affero General Public License v3 http://www.gnu.org/licenses/agpl.html'
 
 
@@ -516,7 +518,7 @@ class WebLab(object):
                 self.loop(int(threads), reload)
 
             if reload:
-                from werkzeug.serving import run_with_reloader
+                from werkzeug._reloader import run_with_reloader
                 run_with_reloader(run_loop)
             else:
                 run_loop()

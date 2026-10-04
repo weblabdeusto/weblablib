@@ -84,6 +84,7 @@ class BaseWebLabTest(unittest.TestCase):
     def get_config(self):
         return {
             'SECRET_KEY': 'super-secret',
+            'WEBLAB_REDIS_URL': os.environ['WEBLABLIB_TEST_REDIS_URL'],
             'WEBLAB_USERNAME': 'weblabdeusto',
             'WEBLAB_PASSWORD': 'password',
             'SERVER_NAME': self.server_name,
@@ -93,6 +94,8 @@ class BaseWebLabTest(unittest.TestCase):
         }
 
     def create_weblab(self):
+        if not os.environ.get('WEBLABLIB_TEST_REDIS_URL'):
+            self.skipTest('Use run_python_tests.py to start a private Redis')
         weblablib._CleanerThread.created = False
         self.weblab = weblablib.WebLab()
         self.app = Flask(__name__)
@@ -100,10 +103,10 @@ class BaseWebLabTest(unittest.TestCase):
         self.server_name = 'localhost:5000'
         self.app.config.update(self.get_config())
         self.auth_headers = {
-            'Authorization': 'Basic ' + base64.encodestring(b'weblabdeusto:password').decode('utf8').strip(),
+            'Authorization': 'Basic ' + base64.encodebytes(b'weblabdeusto:password').decode('utf8').strip(),
         }
         self.wrong_auth_headers = {
-            'Authorization': 'Basic ' + base64.encodestring(b'wrong_weblabdeusto:wrong_password').decode('utf8').strip(),
+            'Authorization': 'Basic ' + base64.encodebytes(b'wrong_weblabdeusto:wrong_password').decode('utf8').strip(),
         }
 
         @self.weblab.task(unique='global')
@@ -161,7 +164,7 @@ class BaseWebLabTest(unittest.TestCase):
 
         with self.assertRaises(ValueError) as cm:
             # 43 characters is the length of create_token()
-            self.assertEquals(43, len(weblablib.create_token()))
+            self.assertEqual(43, len(weblablib.create_token()))
 
             # Therefore, having a task with that name length is forbidden
             # to avoid any potential issue in get_task
@@ -201,25 +204,25 @@ class WebLabApiTest(BaseWebLabTest):
     def test_api(self):
         with self.app.test_client() as client:
             result = self.get_json(client.get('/weblab/sessions/api'))
-            self.assertEquals(result['api_version'], '1')
+            self.assertEqual(result['api_version'], '1')
 
     def test_weblab_test_without_auth(self):
         with self.app.test_client() as client:
             result = self.get_json(client.get('/weblab/sessions/test'))
-            self.assertEquals(result['valid'], False)
+            self.assertEqual(result['valid'], False)
             self.assertIn("no username", result['error_messages'][0])
 
     def test_weblab_test_with_wrong_auth(self):
         with StdWrap():
             with self.app.test_client() as client:
                 result = self.get_json(client.get('/weblab/sessions/test', headers=self.wrong_auth_headers))
-                self.assertEquals(result['valid'], False)
+                self.assertEqual(result['valid'], False)
                 self.assertIn("wrong username", result['error_messages'][0])
 
     def test_weblab_test_with_right_auth(self):
         with self.app.test_client() as client:
             result = self.get_json(client.get('/weblab/sessions/test', headers=self.auth_headers))
-            self.assertEquals(result['valid'], True)
+            self.assertEqual(result['valid'], True)
 
     def test_weblab_status_with_wrong_auth(self):
         with StdWrap():
@@ -231,7 +234,7 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
     def test_token(self):
         token1 = self.weblab.create_token()
         token2 = self.weblab.create_token()
-        self.assertNotEquals(token1, token2)
+        self.assertNotEqual(token1, token2)
 
     def test_task_not_found(self):
         task = self.weblab.get_task("does.not.exist")
@@ -260,20 +263,20 @@ class SimpleUnauthenticatedTest(BaseWebLabTest):
             self.assertIsNone(weblablib.weblab_user.locale)
             self.assertIsNotNone(weblablib.weblab_user.data)
             with self.assertRaises(TypeError):
-                self.assertEquals(0, len(weblablib.weblab_user.data))
+                self.assertEqual(0, len(weblablib.weblab_user.data))
 
     def test_anonymous_on_active(self):
         with self.app.test_client() as client:
             with LifecycleLogCapture(self.app) as logs:
                 rv = client.get('/lab/active')
             self.assertIn("forbidden", self.get_text(rv))
-            self.assertEquals(len(logs.events), 1)
+            self.assertEqual(len(logs.events), 1)
             event = logs.events[0]
-            self.assertEquals(event['action'], 'protected_request_rejected')
-            self.assertEquals(event['reason'], 'anonymous_no_session_cookie')
-            self.assertEquals(event['status'], 403)
-            self.assertEquals(event['path'], '/lab/active')
-            self.assertEquals(event['method'], 'GET')
+            self.assertEqual(event['action'], 'protected_request_rejected')
+            self.assertEqual(event['reason'], 'anonymous_no_session_cookie')
+            self.assertEqual(event['status'], 403)
+            self.assertEqual(event['path'], '/lab/active')
+            self.assertEqual(event['method'], 'GET')
             self.assertIsNone(event['session_id_hash'])
             self.assertNotIn('username', event)
             self.assertNotIn('full_name', event)
@@ -352,7 +355,7 @@ class LifecycleLoggingDisabledTest(BaseWebLabTest):
             with LifecycleLogCapture(self.app) as logs:
                 rv = client.get('/lab/active')
         self.assertIn("forbidden", self.get_text(rv))
-        self.assertEquals(logs.events, [])
+        self.assertEqual(logs.events, [])
 
 class UnauthorizedLinkSimpleTest(BaseWebLabTest):
     def get_config(self):
@@ -363,7 +366,7 @@ class UnauthorizedLinkSimpleTest(BaseWebLabTest):
     def test_unauthorized_link(self):
          with self.app.test_client() as client:
             rv = client.get('/lab/', follow_redirects=False)
-            self.assertEquals(rv.location, 'http://mylink')
+            self.assertEqual(rv.location, 'http://mylink')
 
 class UnauthorizedTemplateSimpleTest(BaseWebLabTest):
     def get_config(self):
@@ -384,7 +387,7 @@ class UnauthorizedTemplateSimpleTest(BaseWebLabTest):
             finally:
                 weblablib.render_template = old_render_template
 
-            self.assertEquals(lab_result, 'mytemplate.html')
+            self.assertEqual(lab_result, 'mytemplate.html')
 
 class TestNewUserError(Exception):
     pass
@@ -494,33 +497,33 @@ class UserTest(BaseSessionWebLabTest):
         # starts a new task, which establishes that counter is zero
         response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
 
-        self.assertEquals(weblablib.weblab_user.session_id, session_id1)
-        self.assertEquals(weblablib.weblab_user.locale, 'es_ES')
-        self.assertEquals(weblablib.weblab_user.full_name, 'Jim Smith')
-        self.assertEquals(weblablib.weblab_user.experiment_name, 'mylab')
-        self.assertEquals(weblablib.weblab_user.category_name, 'Lab experiments')
-        self.assertEquals(weblablib.weblab_user.experiment_id, 'mylab@Lab experiments')
-        self.assertEquals(weblablib.weblab_user.request_client_data['in_test'], True)
-        self.assertEquals(weblablib.weblab_user.request_server_data['request.username'], 'jim.smith')
-        self.assertEquals(weblablib.weblab_user.start_date, float(self._start_time_float))
+        self.assertEqual(weblablib.weblab_user.session_id, session_id1)
+        self.assertEqual(weblablib.weblab_user.locale, 'es_ES')
+        self.assertEqual(weblablib.weblab_user.full_name, 'Jim Smith')
+        self.assertEqual(weblablib.weblab_user.experiment_name, 'mylab')
+        self.assertEqual(weblablib.weblab_user.category_name, 'Lab experiments')
+        self.assertEqual(weblablib.weblab_user.experiment_id, 'mylab@Lab experiments')
+        self.assertEqual(weblablib.weblab_user.request_client_data['in_test'], True)
+        self.assertEqual(weblablib.weblab_user.request_server_data['request.username'], 'jim.smith')
+        self.assertEqual(weblablib.weblab_user.start_date, float(self._start_time_float))
 
         task_id = response.split('@@task@@')[1]
 
         # There is one task, which is running
-        self.assertEquals(len(self.weblab.tasks), 1)
-        self.assertEquals(len(self.weblab.running_tasks), 1)
+        self.assertEqual(len(self.weblab.tasks), 1)
+        self.assertEqual(len(self.weblab.running_tasks), 1)
 
         task1 = self.weblab.get_task(task_id)
         self.assertIsNotNone(task1)
-        self.assertEquals(task1.name, 'task')
-        self.assertEquals(task1.status, 'submitted')
+        self.assertEqual(task1.name, 'task')
+        self.assertEqual(task1.status, 'submitted')
         self.assertTrue(task1.submitted)
         self.assertFalse(task1.finished)
         self.assertFalse(task1.stopping)
         self.assertFalse(task1.done)
         self.assertFalse(task1.failed)
         self.assertFalse(task1.running)
-        self.assertEquals(task1.session_id, session_id1)
+        self.assertEqual(task1.session_id, session_id1)
         self.assertIsNone(task1.result)
         self.assertIsNone(task1.error)
         task1.stop()
@@ -532,28 +535,28 @@ class UserTest(BaseSessionWebLabTest):
         task1d = self.weblab.get_running_task(self.current_task)
         task1e = self.weblab.get_running_task('task')
 
-        self.assertEquals(task1b, task1)
-        self.assertEquals(task1c, task1)
-        self.assertEquals(task1d, task1)
-        self.assertEquals(task1e, task1)
+        self.assertEqual(task1b, task1)
+        self.assertEqual(task1c, task1)
+        self.assertEqual(task1d, task1)
+        self.assertEqual(task1e, task1)
 
         tasks_b = self.weblab.get_tasks(self.current_task)
         tasks_c = self.weblab.get_tasks('task')
         tasks_d = self.weblab.get_running_tasks(self.current_task)
         tasks_e = self.weblab.get_running_tasks('task')
 
-        self.assertEquals(1, len(tasks_b))
-        self.assertEquals(1, len(tasks_c))
-        self.assertEquals(1, len(tasks_d))
-        self.assertEquals(1, len(tasks_e))
+        self.assertEqual(1, len(tasks_b))
+        self.assertEqual(1, len(tasks_c))
+        self.assertEqual(1, len(tasks_d))
+        self.assertEqual(1, len(tasks_e))
 
-        self.assertEquals(0, len(self.weblab.get_tasks('foo')))
-        self.assertEquals(0, len(self.weblab.get_running_tasks('foo')))
+        self.assertEqual(0, len(self.weblab.get_tasks('foo')))
+        self.assertEqual(0, len(self.weblab.get_running_tasks('foo')))
 
-        self.assertEquals(tasks_b[0], task1)
-        self.assertEquals(tasks_c[0], task1)
-        self.assertEquals(tasks_d[0], task1)
-        self.assertEquals(tasks_e[0], task1)
+        self.assertEqual(tasks_b[0], task1)
+        self.assertEqual(tasks_c[0], task1)
+        self.assertEqual(tasks_d[0], task1)
+        self.assertEqual(tasks_e[0], task1)
 
         # We're outside a task
         self.assertFalse(weblablib.current_task_stopping)
@@ -561,7 +564,7 @@ class UserTest(BaseSessionWebLabTest):
         self.weblab.join_tasks(self.current_task, timeout=0.01, stop=True)
 
         # But the counter is still zero
-        self.assertEquals(self.counter, 0)
+        self.assertEqual(self.counter, 0)
     
         global started
         started = False
@@ -585,34 +588,34 @@ class UserTest(BaseSessionWebLabTest):
         self.weblab.run_tasks()
 
         background_thread.join(timeout=5)
-        self.assertFalse(background_thread.isAlive())
+        self.assertFalse(background_thread.is_alive())
 
         # The task has been run
-        self.assertEquals(self.counter, 1)
+        self.assertEqual(self.counter, 1)
 
         # There is still 1 task in this session, but no running task
-        self.assertEquals(len(self.weblab.tasks), 1)
-        self.assertEquals(len(self.weblab.running_tasks), 0)
+        self.assertEqual(len(self.weblab.tasks), 1)
+        self.assertEqual(len(self.weblab.running_tasks), 0)
         
         # Let's retrieve the task again
         task2 = self.weblab.get_task(task_id)
-        self.assertEquals(task2.status, 'done')
+        self.assertEqual(task2.status, 'done')
         self.assertTrue(task2.done)
         self.assertTrue(task2.finished)
         self.assertFalse(task2.failed)
         self.assertFalse(task2.submitted)
         self.assertFalse(task2.running)
         self.assertIsNone(task2.error)
-        self.assertEquals(task2.result, [1, 'bar'])
+        self.assertEqual(task2.result, [1, 'bar'])
         self.assertIn('inside', task2.data)
-        self.assertEquals(task2.data['inside'], 'yes')
+        self.assertEqual(task2.data['inside'], 'yes')
 
         self.assertFalse(weblablib.current_task)
 
         # And let's see how it's the same task as before
-        self.assertEquals(task1, task2)
-        self.assertEquals(hash(task1), hash(task2))
-        self.assertEquals(cmp(task1, task2), 0)
+        self.assertEqual(task1, task2)
+        self.assertEqual(hash(task1), hash(task2))
+        self.assertEqual(cmp(task1, task2), 0)
         self.assertFalse(task1 < task2)
         self.assertFalse(task2 < task1)
 
@@ -620,8 +623,8 @@ class UserTest(BaseSessionWebLabTest):
         task2c = self.weblab.get_task('task')
         task2d = self.weblab.get_running_task(self.current_task)
         task2e = self.weblab.get_running_task('task')
-        self.assertEquals(task2b, task2)
-        self.assertEquals(task2c, task2)
+        self.assertEqual(task2b, task2)
+        self.assertEqual(task2c, task2)
         self.assertIsNone(task2d)
         self.assertIsNone(task2e)
 
@@ -636,8 +639,8 @@ class UserTest(BaseSessionWebLabTest):
         # for many other hash(x) > hash(2 ^ 61 - 1))
 
         self.assertIn(task1.task_id, repr(task1))
-        self.assertNotEquals(task1, task1.task_id)
-        self.assertNotEquals(cmp(task1, task1.task_id), 0)
+        self.assertNotEqual(task1, task1.task_id)
+        self.assertNotEqual(cmp(task1, task1.task_id), 0)
 
         # Cool!
 
@@ -647,7 +650,7 @@ class UserTest(BaseSessionWebLabTest):
 
         # Even before cleaning expired users
         rv = self.client.get('/lab/active')
-        self.assertEquals(rv.location, 'http://weblab.deusto.es')
+        self.assertEqual(rv.location, 'http://weblab.deusto.es')
 
 
         self.weblab.clean_expired_users()
@@ -656,24 +659,24 @@ class UserTest(BaseSessionWebLabTest):
         self.dispose(session_id1)
 
         rv = self.client.get('/lab/active')
-        self.assertEquals(rv.location, 'http://weblab.deusto.es')
+        self.assertEqual(rv.location, 'http://weblab.deusto.es')
         
         self.client.get('/lab/')
         self.assertFalse(weblablib.weblab_user.active)
         self.assertFalse(weblablib.weblab_user.is_anonymous)
-        self.assertEquals(weblablib.weblab_user.time_left, 0)
-        self.assertEquals(weblablib.weblab_user.session_id, session_id1)
+        self.assertEqual(weblablib.weblab_user.time_left, 0)
+        self.assertEqual(weblablib.weblab_user.session_id, session_id1)
         self.assertIn(session_id1, str(weblablib.weblab_user))
         with self.assertRaises(NotImplementedError):
             weblablib.weblab_user.data = {}
 
         with self.assertRaises(NotImplementedError):
             weblablib.weblab_user.update_data()
-        self.assertEquals(weblablib.weblab_user.locale, 'es_ES')
-        self.assertEquals(weblablib.weblab_user.full_name, 'Jim Smith')
-        self.assertEquals(weblablib.weblab_user.experiment_name, 'mylab')
-        self.assertEquals(weblablib.weblab_user.category_name, 'Lab experiments')
-        self.assertEquals(weblablib.weblab_user.experiment_id, 'mylab@Lab experiments')
+        self.assertEqual(weblablib.weblab_user.locale, 'es_ES')
+        self.assertEqual(weblablib.weblab_user.full_name, 'Jim Smith')
+        self.assertEqual(weblablib.weblab_user.experiment_name, 'mylab')
+        self.assertEqual(weblablib.weblab_user.category_name, 'Lab experiments')
+        self.assertEqual(weblablib.weblab_user.experiment_id, 'mylab@Lab experiments')
 
     def test_expired_known_user_rejection_logs_redirect(self):
         launch_url1, session_id1 = self.new_user()
@@ -683,17 +686,17 @@ class UserTest(BaseSessionWebLabTest):
         with LifecycleLogCapture(self.app) as logs:
             rv = self.client.get('/lab/active')
 
-        self.assertEquals(rv.status_code, 302)
-        self.assertEquals(rv.location, 'http://weblab.deusto.es')
-        self.assertEquals(len(logs.events), 1)
+        self.assertEqual(rv.status_code, 302)
+        self.assertEqual(rv.location, 'http://weblab.deusto.es')
+        self.assertEqual(len(logs.events), 1)
         event = logs.events[0]
-        self.assertEquals(event['action'], 'protected_request_rejected')
-        self.assertEquals(event['reason'], 'user_exited')
-        self.assertEquals(event['status'], 302)
-        self.assertEquals(event['path'], '/lab/active')
-        self.assertEquals(event['method'], 'GET')
-        self.assertEquals(event['experiment_name'], 'mylab')
-        self.assertEquals(event['category_name'], 'Lab experiments')
+        self.assertEqual(event['action'], 'protected_request_rejected')
+        self.assertEqual(event['reason'], 'user_exited')
+        self.assertEqual(event['status'], 302)
+        self.assertEqual(event['path'], '/lab/active')
+        self.assertEqual(event['method'], 'GET')
+        self.assertEqual(event['experiment_name'], 'mylab')
+        self.assertEqual(event['category_name'], 'Lab experiments')
         self.assertTrue(event['session_id_hash'])
         self.assertNotIn(session_id1, json.dumps(event))
         self.assertNotIn('jim.smith', json.dumps(event))
@@ -706,14 +709,14 @@ class UserTest(BaseSessionWebLabTest):
         time.sleep(0.2)
 
         with LifecycleLogCapture(self.app) as logs:
-            self.assertEquals(self.status()['should_finish'], -1)
-            self.assertEquals(self.status()['should_finish'], -1)
+            self.assertEqual(self.status()['should_finish'], -1)
+            self.assertEqual(self.status()['should_finish'], -1)
 
         events = logs.events
-        self.assertEquals(len(events), 1)
-        self.assertEquals(events[0]['action'], 'expiry_detected')
-        self.assertEquals(events[0]['reason'], 'time_limit_reached')
-        self.assertEquals(events[0]['source'], 'status_time')
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['action'], 'expiry_detected')
+        self.assertEqual(events[0]['reason'], 'time_limit_reached')
+        self.assertEqual(events[0]['source'], 'status_time')
         self.assertTrue(events[0]['session_id_hash'])
         self.assertNotIn(session_id1, json.dumps(events[0]))
 
@@ -724,13 +727,13 @@ class UserTest(BaseSessionWebLabTest):
         time.sleep(0.2)
 
         with LifecycleLogCapture(self.app) as logs:
-            self.assertEquals(self.status()['should_finish'], -1)
-            self.assertEquals(self.status()['should_finish'], -1)
+            self.assertEqual(self.status()['should_finish'], -1)
+            self.assertEqual(self.status()['should_finish'], -1)
 
         events = logs.events
-        self.assertEquals(len(events), 1)
-        self.assertEquals(events[0]['action'], 'expiry_detected')
-        self.assertEquals(events[0]['reason'], 'inactivity_timeout')
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['action'], 'expiry_detected')
+        self.assertEqual(events[0]['reason'], 'inactivity_timeout')
 
     def test_logout_status_logs_user_exited_expiry(self):
         launch_url1, session_id1 = self.new_user()
@@ -738,11 +741,11 @@ class UserTest(BaseSessionWebLabTest):
         self.client.get('/logout')
 
         with LifecycleLogCapture(self.app) as logs:
-            self.assertEquals(self.status()['should_finish'], -1)
+            self.assertEqual(self.status()['should_finish'], -1)
 
-        self.assertEquals(len(logs.events), 1)
-        self.assertEquals(logs.events[0]['action'], 'expiry_detected')
-        self.assertEquals(logs.events[0]['reason'], 'user_exited')
+        self.assertEqual(len(logs.events), 1)
+        self.assertEqual(logs.events[0]['action'], 'expiry_detected')
+        self.assertEqual(logs.events[0]['reason'], 'user_exited')
 
     def test_status_concrete_time_left_without_timestamp(self):
         # New user, with 3 seconds
@@ -774,7 +777,7 @@ class UserTest(BaseSessionWebLabTest):
         should_finish = self.status()['should_finish']
 
         # Logged out
-        self.assertEquals(should_finish, -1)
+        self.assertEqual(should_finish, -1)
 
     def test_status_time_left_passed(self):
         # New user, with 3 seconds
@@ -786,7 +789,7 @@ class UserTest(BaseSessionWebLabTest):
         should_finish = self.status()['should_finish']
 
         # time passed
-        self.assertEquals(should_finish, -1)
+        self.assertEqual(should_finish, -1)
 
     def test_status_timeout(self):
         # New user, with 3 seconds
@@ -799,7 +802,7 @@ class UserTest(BaseSessionWebLabTest):
         should_finish = self.status()['should_finish']
 
         # time passed
-        self.assertEquals(should_finish, -1)
+        self.assertEqual(should_finish, -1)
 
 class LifecycleSessionTest(BaseSessionWebLabTest):
     def lab(self):
@@ -812,12 +815,12 @@ class LifecycleSessionTest(BaseSessionWebLabTest):
         with LifecycleLogCapture(self.app) as logs:
             result = self.dispose()
 
-        self.assertEquals(result['message'], 'Deleted')
+        self.assertEqual(result['message'], 'Deleted')
         events = logs.events
-        self.assertEquals(len(events), 1)
-        self.assertEquals(events[0]['action'], 'disposed')
-        self.assertEquals(events[0]['reason'], 'unknown_expiry')
-        self.assertEquals(events[0]['source'], 'dispose_user')
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['action'], 'disposed')
+        self.assertEqual(events[0]['reason'], 'unknown_expiry')
+        self.assertEqual(events[0]['source'], 'dispose_user')
         self.assertNotIn(session_id1, json.dumps(events[0]))
 
 class TaskFailTest(BaseSessionWebLabTest):
@@ -839,7 +842,7 @@ class TaskFailTest(BaseSessionWebLabTest):
         task_id = response
 
         task = self.weblab.get_task(response)
-        self.assertEquals(task.status, 'submitted')
+        self.assertEqual(task.status, 'submitted')
         self.assertTrue(task.submitted)
         self.assertFalse(task.failed)
         self.assertFalse(task.finished)
@@ -851,7 +854,7 @@ class TaskFailTest(BaseSessionWebLabTest):
             self.weblab.run_tasks()
 
         task.retrieve()
-        self.assertEquals(task.status, 'failed')
+        self.assertEqual(task.status, 'failed')
         self.assertTrue(task.failed)
         self.assertTrue(task.finished)
         self.assertFalse(task.done)
@@ -912,8 +915,8 @@ class TaskJoinSameThreadTest(BaseSessionWebLabTest):
 
         task = self.weblab.get_task(response)
         self.assertTrue(task.failed)
-        self.assertEquals('exception', task.error['code'])
-        self.assertEquals('RuntimeError', task.error['class'])
+        self.assertEqual('exception', task.error['code'])
+        self.assertEqual('RuntimeError', task.error['class'])
         self.assertIn('Deadlock', task.error['message'])
         
 
@@ -939,20 +942,20 @@ class LoadUserTest(BaseSessionWebLabTest):
         response = self.get_text(self.client.get(launch_url1, follow_redirects=True))
         user = weblablib.weblab_user.user
         self.assertIsInstance(user, MyLabUser)
-        self.assertEquals(user.username, 'user1')
-        self.assertEquals(user.username_unique, 'unique1')
+        self.assertEqual(user.username, 'user1')
+        self.assertEqual(user.username_unique, 'unique1')
 
         user2 = weblablib.weblab_user.user
         self.assertIsInstance(user2, MyLabUser)
-        self.assertEquals(user2.username, 'user1')
-        self.assertEquals(user2.username_unique, 'unique1')
+        self.assertEqual(user2.username, 'user1')
+        self.assertEqual(user2.username_unique, 'unique1')
 
         launch_url2, session_id2 = self.new_user(username='user2', username_unique='unique2')
         response = self.get_text(self.client.get(launch_url2, follow_redirects=True))
         user3 = weblablib.weblab_user.user
         self.assertIsInstance(user3, MyLabUser)
-        self.assertEquals(user3.username, 'user2')
-        self.assertEquals(user3.username_unique, 'unique2')
+        self.assertEqual(user3.username, 'user2')
+        self.assertEqual(user3.username_unique, 'unique2')
 
     def test_user_loader_fail(self):
         @self.weblab.user_loader
@@ -1008,7 +1011,7 @@ class LongTaskTest(BaseSessionWebLabTest):
                 self.assertFalse(task.failed)
                 self.assertFalse(task.submitted)
                 break
-            self.assertEquals(task_status, 'submitted')
+            self.assertEqual(task_status, 'submitted')
             time.sleep(0.03)
 
             if time.time() - t0 > max_time:
@@ -1206,7 +1209,7 @@ class LongDisposeErrorTest(BaseSessionWebLabTest):
         time.sleep(0.1) # If we are here we know that the thread has finished. Wait a bit
 
         status = self.status()
-        self.assertEquals(status['should_finish'], -1)
+        self.assertEqual(status['should_finish'], -1)
 
 
 
@@ -1278,7 +1281,7 @@ class BaseCLITest(BaseSessionWebLabTest):
 class CLITest(BaseCLITest):
 
     def test_cli_flow(self):
-        runner = CliRunner()
+        runner = self.app.test_cli_runner()
         
         class webbrowser(object):
             @staticmethod
@@ -1289,26 +1292,26 @@ class CLITest(BaseCLITest):
 
         with runner.isolated_filesystem():
             result = runner.invoke(self.app.cli, ["weblab", "fake", "new"])
-            self.assertEquals(result.exit_code, 0)
+            self.assertEqual(result.exit_code, 0)
 
             result = runner.invoke(self.app.cli, ["weblab", "fake", "status"])
             self.assertIn("Should finish: 5", result.output)
-            self.assertEquals(result.exit_code, 0)
+            self.assertEqual(result.exit_code, 0)
 
             result = runner.invoke(self.app.cli, ["weblab", "fake", "dispose"])
             self.assertIn("Deleted", result.output)
-            self.assertEquals(result.exit_code, 0)
+            self.assertEqual(result.exit_code, 0)
 
             result = runner.invoke(self.app.cli, ["weblab", "fake", "dispose"])
             self.assertIn("Session not found", result.output)
-            self.assertEquals(result.exit_code, 0)
+            self.assertEqual(result.exit_code, 0)
 
             result = runner.invoke(self.app.cli, ["weblab", "fake", "status"])
             self.assertIn("Session not found", result.output)
-            self.assertEquals(result.exit_code, 0)
+            self.assertEqual(result.exit_code, 0)
 
             result = runner.invoke(self.app.cli, ["weblab", "fake", "new", "--dont-open-browser"])
-            self.assertEquals(result.exit_code, 0)
+            self.assertEqual(result.exit_code, 0)
 
             request_data = {
                 'action': 'delete',
@@ -1319,23 +1322,23 @@ class CLITest(BaseCLITest):
 
             result = runner.invoke(self.app.cli, ["weblab", "fake", "dispose"])
             self.assertIn("Not found", result.output)
-            self.assertEquals(result.exit_code, 0)
+            self.assertEqual(result.exit_code, 0)
 
     def test_other_cli(self):
-        runner = CliRunner()
+        runner = self.app.test_cli_runner()
 
         result = runner.invoke(self.app.cli, ["weblab", "clean-expired-users"])
-        self.assertEquals(result.exit_code, 0)
+        self.assertEqual(result.exit_code, 0)
 
         result = runner.invoke(self.app.cli, ["weblab", "run-tasks"])
-        self.assertEquals(result.exit_code, 0)
+        self.assertEqual(result.exit_code, 0)
 
     def test_loop_cli(self):
-        runner = CliRunner()
+        runner = self.app.test_cli_runner()
 
         weblablib._TESTING_LOOP = True
         result = runner.invoke(self.app.cli, ["weblab", "loop"])
-        self.assertEquals(result.exit_code, 0)
+        self.assertEqual(result.exit_code, 0)
 
 class CLIFailTest(BaseCLITest):
     def on_start(self, client_data, server_data):
@@ -1343,7 +1346,7 @@ class CLIFailTest(BaseCLITest):
 
     def test_cli_error(self):
 
-        runner = CliRunner()
+        runner = self.app.test_cli_runner()
 
         with runner.isolated_filesystem():
             result = runner.invoke(self.app.cli, ["weblab", "fake", "new", "--dont-open-browser"])
@@ -1354,7 +1357,7 @@ class WebLabSocketIOTest(BaseSessionWebLabTest):
     def create_socketio(self):
         self.socketio = SocketIO(self.app)
 
-        @self.socketio.on('connect')
+        @self.socketio.on('connect', namespace='/test')
         @weblablib.socket_requires_login
         def on_connect():
             self.socketio.emit('results', {'result': 'onconnected'}, namespace='/test')
@@ -1375,10 +1378,7 @@ class WebLabSocketIOTest(BaseSessionWebLabTest):
 
     def test_socket_requires_active(self):
         socket_client = self.socketio.test_client(app=self.app, namespace='/test')
-        socket_client.emit('my-login-test', "hi login", namespace='/test')
-        socket_client.emit('my-active-test', "hi active", namespace='/test')
-        results = socket_client.get_received(namespace='/test')
-        self.assertEquals(len(results), 0)
+        self.assertFalse(socket_client.is_connected(namespace='/test'))
 
         launch_url1, session_id1 = self.new_user()
         response = self.client.get(launch_url1, follow_redirects=False)
@@ -1388,24 +1388,25 @@ class WebLabSocketIOTest(BaseSessionWebLabTest):
         }
 
         socket_client = self.socketio.test_client(app=self.app, namespace='/test', headers=headers)
-        socket_client.connect(namespace='/test', headers = headers)
         socket_client.emit('my-login-test', "hi login", namespace='/test')
         socket_client.emit('my-active-test', "hi active", namespace='/test')
         results = socket_client.get_received(namespace='/test')
-        self.assertEquals(len(results), 3)
-        self.assertEquals(results[0]['args'][0]['result'], 'onconnected')
-        self.assertEquals(results[1]['args'][0]['result'], 'onlogin')
-        self.assertEquals(results[2]['args'][0]['result'], 'onactive')
-        socket_client.disconnect()
+        self.assertEqual(len(results), 3)
+        self.assertEqual(results[0]['args'][0]['result'], 'onconnected')
+        self.assertEqual(results[1]['args'][0]['result'], 'onlogin')
+        self.assertEqual(results[2]['args'][0]['result'], 'onactive')
+        socket_client.disconnect(namespace='/test')
 
         self.client.get('/logout')
 
         socket_client = self.socketio.test_client(app=self.app, namespace='/test', headers=headers)
+        socket_client.get_received(namespace='/test')  # Drain the connect event.
         socket_client.emit('my-login-test', "hi login", namespace='/test')
-        socket_client.emit('my-active-test', "hi active", namespace='/test')
         results = socket_client.get_received(namespace='/test')
-        self.assertEquals(len(results), 1)
-        self.assertEquals(results[0]['args'][0]['result'], 'onlogin')
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['args'][0]['result'], 'onlogin')
+        socket_client.emit('my-active-test', "hi active", namespace='/test')
+        self.assertFalse(socket_client.is_connected(namespace='/test'))
 
 
 class WebLabConfigErrorsTest(unittest.TestCase):
