@@ -5,8 +5,10 @@ built 0.5.10 wheel. It retains Redis indices, concurrency/fail-closed behavior a
 the timestamp correction. The runtime changes import Markup from MarkupSafe and
 use Werkzeug's relocated development reloader. No reservation protocol changed.
 
-Run `python run_python_tests.py` in environments containing Flask/Redis/Requests/
-Six and Flask-SocketIO. The runner creates a private persistence-disabled Redis
+Install the selected labslandlib runtime profile, then `pip install -r
+requirements_test.txt`. Run `python run_python_tests.py` in that environment.
+The historical `requirements.txt` contains an obsolete SocketIO development pin;
+use the explicit test requirements for this compatibility matrix. The runner creates a private persistence-disabled Redis
 Unix socket. Never run the historical tests against production Redis: their
 session fixture intentionally clears its isolated database. The runner requires
 redis-server and fails if it is unavailable.
