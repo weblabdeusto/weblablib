@@ -17,6 +17,7 @@ from weblablib.config import ConfigurationKeys
 from weblablib.utils import create_token, _to_timestamp, _current_backend, _current_weblab, _current_timestamp
 from weblablib.users import CurrentUser, _set_weblab_user_cache
 from weblablib.ops import status_time, update_weblab_user_data, dispose_user
+from weblablib.startup import initialization_keepalive
 
 weblab_blueprint = Blueprint("weblab", __name__) # pylint: disable=invalid-name
 
@@ -140,7 +141,12 @@ def _process_start_request(request_data):
         _set_weblab_user_cache(user)
         weblab._set_session_id(session_id)
         try:
-            data = weblab._on_start(client_initial_data, server_initial_data)
+            with initialization_keepalive(backend, session_id, weblab.timeout, user.max_date):
+                data = weblab._on_start(client_initial_data, server_initial_data)
+                if data:
+                    user.data = data
+                user.data.store_if_modified()
+                update_weblab_user_data(response=None)
         except Exception as error:
             traceback.print_exc()
             current_app.logger.warning("Error calling _on_start: {}".format(error), exc_info=True)
@@ -151,11 +157,6 @@ def _process_start_request(request_data):
                 current_app.logger.warning("Error calling _on_dispose after _on_start failed: {}".format(nested_error), exc_info=True)
 
             return dict(error=True, message="Error initializing laboratory")
-        else:
-            if data:
-                user.data = data
-            user.data.store_if_modified()
-            update_weblab_user_data(response=None)
 
     link = url_for('weblab_callback_url', session_id=session_id, _external=True, **kwargs)
     return dict(url=link, session_id=session_id)
