@@ -99,7 +99,7 @@ __all__ = ['WebLab',
            'AlreadyRunningError', 'CurrentUser', 'AnonymousUser',
            'ExpiredUser']
 
-__version__ = '0.5.9'
+__version__ = '0.5.9+llbrowser1'
 __license__ = 'GNU Affero General Public License v3 http://www.gnu.org/licenses/agpl.html'
 
 
@@ -243,6 +243,11 @@ class WebLab(object):
         #
         self._session_id_name = self._app.config.get(ConfigurationKeys.WEBLAB_SESSION_ID_NAME, 'weblab_session_id')
         self.timeout = self._app.config.get(ConfigurationKeys.WEBLAB_TIMEOUT, 15)
+        self.browser_poll_interval = float(self._app.config.get(
+            ConfigurationKeys.WEBLAB_BROWSER_POLL_INTERVAL,
+            os.environ.get(ConfigurationKeys.WEBLAB_BROWSER_POLL_INTERVAL, self.timeout / 2)))
+        if self.timeout > 0 and not 0 < self.browser_poll_interval < self.timeout:
+            raise InvalidConfigError('WEBLAB_BROWSER_POLL_INTERVAL must be positive and below WEBLAB_TIMEOUT')
         self.poll_interval = self._app.config.get(ConfigurationKeys.WEBLAB_POLL_INTERVAL, 5)
         self.cleaner_thread_interval = self._app.config.get(ConfigurationKeys.WEBLAB_CLEANER_INTERVAL, 5)
         autopoll = self._app.config.get(ConfigurationKeys.WEBLAB_AUTOPOLL, True)
@@ -352,7 +357,7 @@ class WebLab(object):
             if self.timeout <= 0:
                 return Markup("<!-- timeout is 0 or negative; no script -->")
 
-            weblab_timeout = int(1000 * self.timeout / 2)
+            weblab_timeout = int(1000 * self.browser_poll_interval)
             session_id = _current_session_id()
             if not session_id:
                 return Markup("<!-- session_id not found; no script -->")

@@ -72,6 +72,10 @@ class ConfigurationKeys(object):
     # to -1 to disable the timeout (and therefore polling makes no sense)
     WEBLAB_TIMEOUT = 'WEBLAB_TIMEOUT'
 
+    # Browser heartbeat cadence in seconds; defaults to half WEBLAB_TIMEOUT.
+    # Independent of the server-side coordinator polling interval below.
+    WEBLAB_BROWSER_POLL_INTERVAL = 'WEBLAB_BROWSER_POLL_INTERVAL'
+
     # Automatically poll in every method. By default it's true. So any call
     # made to any web method will automatically poll.
     WEBLAB_AUTOPOLL = 'WEBLAB_AUTOPOLL'
