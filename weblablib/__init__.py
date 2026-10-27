@@ -236,7 +236,8 @@ class WebLab(object):
                 redis_index_epoch = os.environ.get(ConfigurationKeys.WEBLAB_REDIS_INDEX_EPOCH)
             self._backend = RedisManager(redis_url, redis_base, task_expires, self,
                                          index_mode=redis_index_mode,
-                                         index_epoch=redis_index_epoch)
+                                         index_epoch=redis_index_epoch,
+                                         client_factory=self._app.config.get('WEBLAB_REDIS_CLIENT_FACTORY'))
 
         #
         # Initialize session settings

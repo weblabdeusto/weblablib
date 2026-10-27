@@ -76,3 +76,12 @@ You may find [here](https://github.com/weblabdeusto/weblablib/tree/master/exampl
  * [complete](https://github.com/weblabdeusto/weblablib/tree/master/examples/complete): based on advanced, but using WebSockets with Flask-SocketIO, internationalization with Flask-Babel and minimified static files with Flask-Assets.
 
 There is another example called ``quickstart``, which is the one used in the documentation, which is something in between ``simple`` and ``advanced``.
+
+### Custom Redis transport
+
+`WEBLAB_REDIS_CLIENT_FACTORY` optionally supplies a callable with the same
+`(url, **kwargs)` contract as `redis.StrictRedis.from_url`. It is selected before
+backend/session/task initialization; failures propagate rather than falling back
+to a different connection. Use an importable, pickleable module-level function
+when the application uses worker processes. The default remains redis-py's
+standard client.
