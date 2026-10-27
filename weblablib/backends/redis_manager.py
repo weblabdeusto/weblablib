@@ -42,8 +42,9 @@ class RedisManager(object):
     """
 
     def __init__(self, redis_url, key_base, task_expires, weblab,
-                 index_mode='legacy', index_epoch=None):
-        self.client = redis.StrictRedis.from_url(redis_url, decode_responses=True)
+                 index_mode='legacy', index_epoch=None, client_factory=None):
+        factory = client_factory or redis.StrictRedis.from_url
+        self.client = factory(redis_url, decode_responses=True)
         self.weblab = weblab
         self.key_base = key_base  # Redis base prefix to use. It is *not* user or session specific.
 
