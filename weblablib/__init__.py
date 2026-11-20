@@ -239,7 +239,9 @@ class WebLab(object):
             self._backend = RedisManager(redis_url, redis_base, task_expires, self,
                                          index_mode=redis_index_mode,
                                          index_epoch=redis_index_epoch,
-                                         client_factory=self._app.config.get('WEBLAB_REDIS_CLIENT_FACTORY'))
+                                         client_factory=self._app.config.get('WEBLAB_REDIS_CLIENT_FACTORY'),
+                                         defer_index_readiness=self._app.config.get(
+                                             ConfigurationKeys.WEBLAB_REDIS_INDEX_DEFER_READINESS) is True)
 
         #
         # Initialize session settings

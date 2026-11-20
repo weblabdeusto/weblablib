@@ -1069,6 +1069,27 @@ class RedisIndexFlaskIntegrationTest(BaseRedisIndexTest):
         extension = weblablib.WebLab(app)
         return app, extension
 
+    def test_worker_can_prepare_index_after_redis_loses_its_state(self):
+        config = {'WEBLAB_REDIS_INDEX_MODE': 'indexed',
+                  'WEBLAB_REDIS_INDEX_EPOCH': 'epoch-1'}
+        with self.assertRaises(InvalidConfigError):
+            self.create_app(config)
+
+        config['WEBLAB_REDIS_INDEX_DEFER_READINESS'] = True
+        _, extension = self.create_app(config)
+        self.addCleanup(extension._cleanup)
+        manager = extension._backend
+        self.assertIsNone(self.client.get(self.ready_key))
+        self.seed_session('restored-session')
+        manager.ensure_redis_index()
+        self.assertTrue(manager.redis_index_status()['ready'])
+        self.assertIn('restored-session', self.client.smembers(self.active_index_key))
+
+        self.client.srem(self.pending_index_key, INDEX_SENTINEL)
+        manager.ensure_redis_index()
+        self.assertTrue(manager.redis_index_status()['ready'])
+        self.assertEqual(self.client.smembers(self.pending_index_key), {INDEX_SENTINEL})
+
     def test_environment_fallback_and_flask_config_precedence(self):
         old_mode = os.environ.get('WEBLAB_REDIS_INDEX_MODE')
         old_epoch = os.environ.get('WEBLAB_REDIS_INDEX_EPOCH')

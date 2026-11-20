@@ -63,6 +63,10 @@ class ConfigurationKeys(object):
     # reconciliation pass.
     WEBLAB_REDIS_INDEX_EPOCH = 'WEBLAB_REDIS_INDEX_EPOCH'
 
+    # An application that gates admission can prepare its configured indices
+    # from its worker before serving sessions. Default: validate during init.
+    WEBLAB_REDIS_INDEX_DEFER_READINESS = 'WEBLAB_REDIS_INDEX_DEFER_READINESS'
+
     # How long the results of the tasks should be stored in Redis? In seconds.
     # By default one hour.
     WEBLAB_TASK_EXPIRES = 'WEBLAB_TASK_EXPIRES'
