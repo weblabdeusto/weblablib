@@ -42,7 +42,8 @@ class RedisManager(object):
     """
 
     def __init__(self, redis_url, key_base, task_expires, weblab,
-                 index_mode='legacy', index_epoch=None):
+                 index_mode='legacy', index_epoch=None,
+                 defer_index_readiness=False):
         self.client = redis.StrictRedis.from_url(redis_url, decode_responses=True)
         self.weblab = weblab
         self.key_base = key_base  # Redis base prefix to use. It is *not* user or session specific.
@@ -63,6 +64,8 @@ class RedisManager(object):
                 raise InvalidConfigError(
                     'WEBLAB_REDIS_INDEX_EPOCH is required in {} mode'.format(
                         self.index_mode))
+            if self.index_mode == 'indexed' and defer_index_readiness:
+                return
             self._preflight_redis_index()
             if self.index_mode == 'indexed':
                 self._validate_indexed_readiness()
@@ -86,7 +89,7 @@ class RedisManager(object):
         except (TypeError, ValueError):
             raise InvalidConfigError('Invalid WEBLAB_REDIS_INDEX_EPOCH')
 
-    def _preflight_redis_index(self):
+    def _preflight_redis_index(self, require_prepared_sets=True):
         try:
             policy_config = self.client.config_get('maxmemory-policy')
             policy = policy_config.get('maxmemory-policy')
@@ -120,7 +123,7 @@ class RedisManager(object):
                             key_type))
 
             ready_epoch = self.client.get(self._index_ready_key)
-            if ready_epoch is not None:
+            if require_prepared_sets and ready_epoch is not None:
                 for key in (self._active_sessions_index_key,
                             self._pending_tasks_index_key):
                     if observed_types[key] != 'set':
@@ -409,6 +412,18 @@ class RedisManager(object):
         if self.index_mode != 'shadow':
             raise InvalidConfigError(
                 'Redis indices can only be prepared in shadow mode')
+        return self._prepare_redis_index(scan_count, lock_ttl)
+
+    def ensure_redis_index(self):
+        """Check or repair this namespace before the application's worker admits sessions."""
+        if self.index_mode != 'indexed':
+            return
+        self._preflight_redis_index(require_prepared_sets=False)
+        if not self.redis_index_status()['ready']:
+            self._prepare_redis_index(scan_count=500, lock_ttl=300)
+        self._index_runtime_unsafe = False
+
+    def _prepare_redis_index(self, scan_count, lock_ttl):
         scan_count = self._validate_scan_count(scan_count)
         try:
             lock_ttl = int(lock_ttl)
